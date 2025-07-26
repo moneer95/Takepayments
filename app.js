@@ -165,19 +165,19 @@ function getInitialFields(req, pageURL, remoteAddr) {
     countryCode:        826,
     currencyCode:       826,
     amount:             total || 1,
-    cardNumber:         card.number     || '4012001037141112',
-    cardExpiryMonth:    card.expiryMonth|| 12,
-    cardExpiryYear:     card.expiryYear || 20,
-    cardCVV:            card.cvv        || '083',
-    customerName:       req.session.customer?.name    || 'Test Customer',
-    customerEmail:      req.session.customer?.email   || 'test@test.com',
-    customerAddress:    req.session.customer?.address || '16 Test Street',
-    customerPostCode:   req.session.customer?.postCode|| 'TE15 5ST',
+    cardNumber:         card.number,
+    cardExpiryMonth:    card.expiryMonth,
+    cardExpiryYear:     card.expiryYear,
+    cardCVV:            card.cvv,
+    customerName:       req.session.customer?.name ,
+    customerEmail:      req.session.customer?.email,
+    customerAddress:    req.session.customer?.address ,
+    customerPostCode:   req.session.customer?.postCode,
     orderRef:           'Test purchase',
     remoteAddress:      remoteAddr,
     merchantCategoryCode: 5411,
     threeDSVersion:     '2',
-    "threeDSRedirectURL": pageURL + (pageURL.includes('?') ? '&' : '?') + 'acs=1'
+    threeDSRedirectURL: (pageURL||'') + '&acs=1'
   };
   console.log('🟢 [getInitialFields]=', f);
   return f;

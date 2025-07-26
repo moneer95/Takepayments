@@ -1,14 +1,15 @@
+const express = require('express');  // Import Express
 const http = require('http'); // Import Node.js core module
 const qs = require('querystring');
 const crypto = require('crypto');
 const httpBuildQuery = require('http-build-query');
 const url = require('url');
-const express = require('express');  // Import Express
 const session = require('express-session');
 const htmlUtils = require('./htmlutils.js');
 const gateway = require('./gateway.js').Gateway;
 const assert = require('assert');
 const cors = require('cors');
+const uuid = require('uuid').v4;  // For generating unique session IDs
 
 // Initialize Express app
 const app = express();  // This was missing in your code
@@ -142,6 +143,6 @@ function getInitialFields(payload, pageURL, remoteAddress) {
 }
 
 // Start the server
-server.listen(8012, () => {
+app.listen(8012, () => {
     console.log('🚀 Server listening on port 8012');
 });

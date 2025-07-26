@@ -68,7 +68,7 @@ app.post('/init', (req, res) => {
 
   // 2.3 render the hidden browser‑info form
   const formHtml = htmlUtils.getWrapHTML(htmlUtils.collectBrowserInfo(req));
-  console.log('🟢 [INIT] sending browser‑info form');
+  console.log('🟢 [INIT] formHtml:', formHtml); // Log the HTML form content
   res.send(formHtml);
 });
 

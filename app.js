@@ -3,12 +3,17 @@ const qs = require('querystring');
 const crypto = require('crypto');
 const httpBuildQuery = require('http-build-query');
 const url = require('url');
+const express = require('express');  // Import Express
+const session = require('express-session');
 const htmlUtils = require('./htmlutils.js');
 const gateway = require('./gateway.js').Gateway;
 const assert = require('assert');
 const cors = require('cors');
 
-// Allow all origins (disabling CORS restrictions)
+// Initialize Express app
+const app = express();  // This was missing in your code
+
+// Enable CORS and session management
 app.use(cors({
   origin: '*', // Allow any origin
   credentials: true,
@@ -16,75 +21,50 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
+app.use(express.json());
+app.use(session({
+  genid: () => uuid(),
+  secret: process.env.SESSION_SECRET || 'change_me',
+  resave: false,
+  saveUninitialized: false,
+  cookie: { secure: false, sameSite: 'none' }
+}));
 
-var server = http.createServer(function(req, res) { // Create web server
-    let body = '';
-    global.times = 0;
+// Endpoint for handling POST requests to `/init`
+app.post('/init', function(req, res) {
+    let body = req.body;  // The POST data sent by the frontend
 
-    if (req.method !== 'POST') {
-        // For GET request, send browser info form
-        body = htmlUtils.collectBrowserInfo(req);
+    // Store the payload data in session
+    req.session.payload = body;
+
+    // Example: Storing some data from the payload in the session
+    req.session.cart = body.cart || [];
+    req.session.card = {
+        number: body.cardNumber,
+        expiryMonth: body.cardExpiryMonth,
+        expiryYear: body.cardExpiryYear,
+        cvv: body.cardCVV
+    };
+    req.session.customer = {
+        name: body.customerName,
+        email: body.customerEmail,
+        address: body.customerAddress,
+        postCode: body.customerPostCode
+    };
+
+    console.log("Session data saved: ", req.session);
+
+    // Proceed with your payment logic (browser info, gateway request, etc.)
+    const fields = getInitialFields(req.session.payload, 'https://d44cf4d997d1.ngrok-free.app/', req.connection.remoteAddress);
+
+    gateway.directRequest(fields).then((response) => {
+        body = processResponseFields(response, gateway);
         sendResponse(body, res);
-    } else {
-        req.on('data', function(data) {
-            body += data;
-
-            // Too much POST data,
-            if (body.length > 1e6)
-                request.connection.destroy();
-        });
-
-        req.on('end', function() {
-            let post;
-            try {
-                post = JSON.parse(body);  // Parse the incoming JSON payload
-            } catch (e) {
-                console.error("Error parsing JSON", e);
-                res.statusCode = 400;
-                res.end("Invalid JSON payload");
-                return;
-            }
-
-            // Collect browser information step - to present to the gateway
-            if (anyKeyStartsWith(post, 'browserInfo[')) {
-                let fields = getInitialFields(post, 'https://takepayments.ea-dental.com/', '127.0.0.1');
-                for ([k, v] of Object.entries(post)) {
-                    fields[k.substr(12, k.length - 13)] = v;
-                }
-
-                gateway.directRequest(fields).then((response) => {
-                    body = processResponseFields(response, gateway);
-                    sendResponse(body, res);
-                }).catch((error) => {
-                    console.error(error);
-                    res.statusCode = 500;
-                    res.end("Gateway error");
-                });
-            } 
-            // Check if it's the 3DS challenge response submission
-            else if (anyKeyStartsWith(post, 'threeDSResponse[')) {
-                let reqFields = {
-                    action: 'SALE',
-                    merchantID: getInitialFields(post, null, null).merchantID,
-                    threeDSRef: global.threeDSRef,
-                    threeDSResponse: '',
-                };
-
-                for ([k, v] of Object.entries(post)) {
-                    reqFields.threeDSResponse += '[' + k + ']' + '__EQUAL__SIGN__' + v + '&';
-                }
-                reqFields.threeDSResponse = reqFields.threeDSResponse.substr(0, reqFields.threeDSResponse.length - 1);
-                gateway.directRequest(reqFields).then((response) => {
-                    body = processResponseFields(response, gateway);
-                    sendResponse(body, res);
-                }).catch((error) => {
-                    console.error(error);
-                    res.statusCode = 500;
-                    res.end("Gateway error");
-                });
-            }
-        });
-    }
+    }).catch((error) => {
+        console.error(error);
+        res.statusCode = 500;
+        res.end("Gateway error");
+    });
 });
 
 // Helper function to check for matching keys
@@ -117,11 +97,8 @@ function sendResponse(body, res) {
     res.end();
 }
 
-server.listen(8012);
-
 // This provides placeholder data for demonstration purposes only.
 function getInitialFields(payload, pageURL, remoteAddress) {
-    // Generate a unique transaction ID
     let uniqid = Math.random().toString(36).substr(2, 10);
 
     // Extract details from the payload
@@ -148,14 +125,14 @@ function getInitialFields(payload, pageURL, remoteAddress) {
         "countryCode": 826,
         "currencyCode": 826,
         "amount": total || 1, // Amount in cents (e.g., $1.00 becomes 100)
-        "cardNumber": '4058888012110947',
-        "cardExpiryMonth": 1,
-        "cardExpiryYear": 30,
-        "cardCVV": 726,
-        "customerName": 'monir',
-        "customerEmail": 'mnyrskyk@gmail.com',
-        "customerAddress": 'customerAddress',
-        "customerPostCode": '0000000',
+        "cardNumber": cardNumber,
+        "cardExpiryMonth": cardExpiryMonth,
+        "cardExpiryYear": cardExpiryYear,
+        "cardCVV": cardCVV,
+        "customerName": customerName,
+        "customerEmail": customerEmail,
+        "customerAddress": customerAddress,
+        "customerPostCode": customerPostCode,
         "orderRef": "Test purchase", // You can modify this as needed
         "remoteAddress": remoteAddress,
         "merchantCategoryCode": 5411, // This is the MCC code for retail
@@ -163,3 +140,8 @@ function getInitialFields(payload, pageURL, remoteAddress) {
         "threeDSRedirectURL": pageURL + "&acs=1", // Redirect URL after authentication
     };
 }
+
+// Start the server
+server.listen(8012, () => {
+    console.log('🚀 Server listening on port 8012');
+});

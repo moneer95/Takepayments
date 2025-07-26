@@ -2,16 +2,16 @@ const express = require('express');
 const qs = require('querystring');
 const crypto = require('crypto');
 const url = require('url');
-const htmlUtils = require('./htmlutils.js');
+const htmlUtils = require('./htmlUtils.js');
 const gateway = require('./gateway.js').Gateway;
 const cors = require('cors');
 
 const app = express();
 
 // Middleware
-app.use(cors()); // Enable CORS if needed
-app.use(express.urlencoded({ extended: true })); // Parse URL-encoded bodies
-app.use(express.json()); // Parse JSON bodies
+app.use(cors());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
 
 // Global variable for 3DS reference
 let threeDSRef = null;
@@ -34,32 +34,35 @@ function processResponseFields(responseFields) {
   }
 }
 
-// Get initial fields for requests
-function getInitialFields(pageURL, remoteAddress) {
-  const uniqid = crypto.randomBytes(8).toString('hex');
-  const redirectURL = pageURL ? `${pageURL}&acs=1` : 'https://takepayments.ea-dental.com/?acs=1';
-
+// Get complete initial fields with all mandatory fields
+function getCompleteInitialFields(pageURL, remoteAddress) {
   return {
     merchantID: "278346",
     action: "SALE",
-    type: 1,
-    transactionUnique: uniqid,
-    countryCode: 826,
-    currencyCode: 826,
-    amount: 1,
-    cardNumber: "4058888012110947",
-    cardExpiryMonth: 1,
-    cardExpiryYear: 30,
-    cardCVV: "726",
+    type: 1, // Transaction type (1 for SALE)
+    transactionUnique: crypto.randomBytes(8).toString('hex'), // Unique transaction ID
+    countryCode: 826, // UK country code
+    currencyCode: 826, // GBP currency code
+    amount: 1, // Amount in smallest currency unit (e.g. pence)
+    cardNumber: "4058888012110947", // Test card number
+    cardExpiryMonth: 1, // Expiry month
+    cardExpiryYear: 30, // Expiry year (2-digit)
+    cardCVV: "726", // Card security code
     customerName: "Test Customer",
     customerEmail: "test@testcustomer.com",
     customerAddress: "16 Test Street",
     customerPostCode: "TE15 5ST",
     orderRef: "Test purchase",
-    remoteAddress: remoteAddress || "127.0.0.1",
-    merchantCategoryCode: 5411,
+    // 3DSv2 specific fields
+    remoteAddress: remoteAddress || req.ip || "127.0.0.1",
+    merchantCategoryCode: 5411, // MCC for grocery stores/supermarkets
     threeDSVersion: "2",
-    threeDSRedirectURL: redirectURL
+    threeDSRedirectURL: `${pageURL}&acs=1` ,
+    // Additional recommended fields
+    deviceChannel: "browser",
+    deviceIdentity: req.headers['user-agent'] || "Unknown",
+    deviceTimeZone: "0",
+    deviceAcceptLanguage: req.headers['accept-language'] || "en-GB"
   };
 }
 
@@ -78,10 +81,11 @@ app.post('/', async (req, res) => {
   try {
     const post = req.body;
 
-    // Handle browser info submission
     if (anyKeyStartsWith(post, 'browserInfo[')) {
-      let fields = getInitialFields('https://d44cf4d997d1.ngrok-free.app/', req.ip);
+      // Handle initial browser info submission
+      let fields = getCompleteInitialFields('https://your-ngrok-url.ngrok-free.app/', req.ip);
       
+      // Merge browser info fields
       Object.entries(post).forEach(([k, v]) => {
         if (k.startsWith('browserInfo[') && k.endsWith(']')) {
           const key = k.substring(12, k.length - 1);
@@ -89,24 +93,21 @@ app.post('/', async (req, res) => {
         }
       });
 
+      console.log("Sending to gateway with fields:", fields); // Debug log
       const response = await gateway.directRequest(fields);
       sendResponse(res, processResponseFields(response));
 
-    // Handle 3DS response
     } else if (!anyKeyStartsWith(post, 'threeDSResponse[')) {
+      // Handle 3DS response
       let reqFields = {
-        action: 'SALE',
-        merchantID: getInitialFields().merchantID,
+        ...getCompleteInitialFields(), // Include all base fields
         threeDSRef: threeDSRef,
-        type: 1, 
-        countryCode: 826,
-        currencyCode: 826,
-        amount: 1,    
         threeDSResponse: Object.entries(post)
           .map(([k, v]) => `[${k}]__EQUAL__SIGN__${v}`)
           .join('&')
       };
 
+      console.log("Sending 3DS response to gateway:", reqFields); // Debug log
       const response = await gateway.directRequest(reqFields);
       sendResponse(res, processResponseFields(response));
     } else {
@@ -114,7 +115,11 @@ app.post('/', async (req, res) => {
     }
   } catch (error) {
     console.error('POST Error:', error);
-    res.status(500).send('Internal Server Error');
+    res.status(500).json({ 
+      error: 'Payment processing failed',
+      details: error.message,
+      code: error.code || 'UNKNOWN_ERROR'
+    });
   }
 });
 
@@ -125,14 +130,12 @@ function sendResponse(res, body) {
     .send(htmlUtils.getWrapHTML(body));
 }
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  res.status(500).send('Internal Server Error');
-});
-
 // Start server
 const PORT = 8012;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log('Ensure all mandatory fields are included in requests:');
+  console.log('- merchantID, type, cardNumber, cardExpiryMonth, cardExpiryYear, cardCVV');
+  console.log('- amount, currencyCode, countryCode');
+  console.log('- For 3DS: threeDSVersion, threeDSRedirectURL');
 });

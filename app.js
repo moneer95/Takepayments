@@ -1,160 +1,144 @@
-const http = require('http'); // Import Node.js core module
+const express = require('express');
 const qs = require('querystring');
-
 const crypto = require('crypto');
-const httpBuildQuery = require('http-build-query');
 const url = require('url');
 const htmlUtils = require('./htmlutils.js');
-
 const gateway = require('./gateway.js').Gateway;
 const assert = require('assert');
-// const merchantSecret = 'pass';
+const cors = require('cors');
+const session = require('express-session');
+const uuid = require('uuid').v4;
 
-var server = http.createServer(function(req, res) { //create web server
-    const getParams = url.parse(req.url, true).query;
-    let body = '';
-    global.times = 0;
+const app = express();
 
-    if (req.method != 'POST') {
-        // Every other request after this is a POST.
-        body = htmlUtils.collectBrowserInfo(req);
-        sendResponse(body, res);
-    } else {
-        body = '';
+// Enable CORS and session management
+app.use(cors({
+  origin: 'https://test.ea-dental.com', // Allow any origin
+  credentials: true,
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 
-        req.on('data', function(data) {
-            body += data;
+// Use express JSON parsing
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-            // Too much POST data,
-            if (body.length > 1e6)
-                request.connection.destroy();
+let globalTimes = 0;
+
+// Route for handling all requests
+app.all('*', (req, res) => {
+  const getParams = url.parse(req.url, true).query;
+  let body = '';
+
+  if (req.method !== 'POST') {
+    // Collect browser information and process the response
+    body = htmlUtils.collectBrowserInfo(req);
+    sendResponse(body, res);
+  } else {
+    req.on('data', (data) => {
+      body += data;
+
+      // Too much POST data, disconnect
+      if (body.length > 1e6) request.connection.destroy();
+    });
+
+    req.on('end', () => {
+      const post = qs.parse(body);
+
+      // Collect browser information to present to the gateway
+      if (anyKeyStartsWith(post, 'browserInfo[')) {
+        let fields = getInitialFields('https://takepayments.ea-dental.com/', '127.0.0.1');
+        for (const [k, v] of Object.entries(post)) {
+          fields[k.substr(12, k.length - 13)] = v;
+        }
+
+        gateway.directRequest(fields).then((response) => {
+          body = processResponseFields(response, gateway);
+          sendResponse(body, res);
+        }).catch((error) => {
+          console.error(error);
         });
+      } else if (!anyKeyStartsWith(post, 'threeDSResponse[')) {
+        let reqFields = {
+          action: 'SALE',
+          merchantID: getInitialFields(null, null).merchantID,
+          threeDSRef: global.threeDSRef,
+          threeDSResponse: '',
+        };
 
-        req.on('end', function() {
-            var post = qs.parse(body);
+        for (const [k, v] of Object.entries(post)) {
+          reqFields.threeDSResponse += `[${k}]__EQUAL__SIGN__${v}&`;
+        }
 
-            // Collect browser information step - to present to the gateway
-            if (anyKeyStartsWith(post, 'browserInfo[')) {
-                let fields = getInitialFields('https://takepayments.ea-dental.com/', '127.0.0.1');
-                for ([k, v] of Object.entries(post)) {
-                    fields[k.substr(12, k.length - 13)] = v;
-                }
+        reqFields.threeDSResponse = reqFields.threeDSResponse.slice(0, -1);
 
-                gateway.directRequest(fields).then((response) => {
-                    body = processResponseFields(response, gateway);
-                    sendResponse(body, res);
-                }).catch((error) => {
-                    console.error(error);
-                });
-                // Gateway responds with result from ACS - potentially featuring a
-                // challenge. Extract the method data, and pass back complete with
-                // threeDSRef previously provided to acknowledge the challenge.
-                // Also catches any continuation challenges and continues to post
-                // until we ultimately receive an auth code
-            } else if (!anyKeyStartsWith(post, 'threeDSResponse[')) {
-                let reqFields = {
-                    action: 'SALE',
-                    merchantID: getInitialFields(null, null).merchantID,
-                    threeDSRef: global.threeDSRef,
-                    threeDSResponse: '',
-                };
-
-                for ([k, v] of Object.entries(post)) {
-                    // http-build-query rightly converts subsequent = signs
-                    // but the gateway is expecting them to form nested
-                    // arrays. Due to this, we substitue them here and
-                    // replace later on.
-                    reqFields.threeDSResponse += '[' + k + ']' + '__EQUAL__SIGN__' + v + '&';
-                }
-                // Remove the last & for good measure
-                reqFields.threeDSResponse = reqFields.threeDSResponse.substr(0, reqFields.threeDSResponse.length - 1);
-                gateway.directRequest(reqFields).then((response) => {
-                    body = processResponseFields(response, gateway);
-                    sendResponse(body, res);
-                }).catch((error) => {
-                    console.error(error);
-                });
-            }
+        gateway.directRequest(reqFields).then((response) => {
+          body = processResponseFields(response, gateway);
+          sendResponse(body, res);
+        }).catch((error) => {
+          console.error(error);
         });
-    }
+      }
+    });
+  }
 });
 
-/*
-	anyKeyStartsWith
-
-	Helper function to find matching keys in an object
-*/
+// Helper function to check if any key starts with a specific needle
 function anyKeyStartsWith(haystack, needle) {
-    for ([k, v] of Object.entries(haystack)) {
-        if (k.startsWith(needle)) {
-            return true;
-        }
+  for (const [k, v] of Object.entries(haystack)) {
+    if (k.startsWith(needle)) {
+      return true;
     }
-
-    return false;
+  }
+  return false;
 }
 
-/*
-	processResponseFields
-
-	Helper function to monitor and act upon differing
-	gateway responses
-*/
+// Helper function to process the gateway's response fields
 function processResponseFields(responseFields, gateway) {
-    switch (responseFields["responseCode"]) {
-        case "65802":
-            // TODO - Please change this to local session storage
-            global.threeDSRef = responseFields["threeDSRef"];
-            return htmlUtils.showFrameForThreeDS(responseFields);
-        case "0":
-            return "<p>Thank you for your payment.</p>"
-        default:
-            return "<p>Failed to take payment: message=" + responseFields["responseMessage"] + " code=" + responseFields["responseCode"] + "</p>" //HTMLEntities.new.encode TODO
-    }
+  switch (responseFields["responseCode"]) {
+    case "65802":
+      global.threeDSRef = responseFields["threeDSRef"];
+      return htmlUtils.showFrameForThreeDS(responseFields);
+    case "0":
+      return "<p>Thank you for your payment.</p>";
+    default:
+      return `<p>Failed to take payment: message=${responseFields["responseMessage"]} code=${responseFields["responseCode"]}</p>`;
+  }
 }
 
-/*
-	sendResponse
-
-	Helper function to wrap sending information
-	steps to the browser
-*/
+// Helper function to send response
 function sendResponse(body, res) {
-    res.writeHead(200, { 'Content-Type': 'text/html' });
-    res.write(htmlUtils.getWrapHTML(body));
-    res.end();
+  res.status(200).send(htmlUtils.getWrapHTML(body));
 }
 
-server.listen(8012);
-
-// This provides placeholder data for demonstration purposes only.
+// Function to get initial fields for the request
 function getInitialFields(pageURL, remoteAddress) {
-
-    let uniqid = Math.random().toString(36).substr(2, 10)
-
-    return {
-        "merchantID": "278346",
-        "action": "SALE",
-        "type": 1,
-        "transactionUnique": uniqid,
-        "countryCode": 826,
-        "currencyCode": 826,
-        "amount": 1,
-        "cardNumber": "4058888012110947",
-        "cardExpiryMonth": 1,
-        "cardExpiryYear": 30,
-        "cardCVV": "726",
-        "customerName": "Test Customer",
-        "customerEmail": "test@testcustomer.com",
-        "customerAddress": "16 Test Street",
-        "customerPostCode": "TE15 5ST",
-        "orderRef": "Test purchase",
-
-        // The following fields are mandatory for 3DSv2 direct integration only
-        "remoteAddress": remoteAddress,
-
-        "merchantCategoryCode": 5411,
-        "threeDSVersion": "2",
-        "threeDSRedirectURL": pageURL + "&acs=1"
-    }
+  const uniqid = Math.random().toString(36).substr(2, 10);
+  return {
+    merchantID: "278346",
+    action: "SALE",
+    type: 1,
+    transactionUnique: uniqid,
+    countryCode: 826,
+    currencyCode: 826,
+    amount: 1,
+    cardNumber: "4058888012110947",
+    cardExpiryMonth: 1,
+    cardExpiryYear: 30,
+    cardCVV: "726",
+    customerName: "Test Customer",
+    customerEmail: "test@testcustomer.com",
+    customerAddress: "16 Test Street",
+    customerPostCode: "TE15 5ST",
+    orderRef: "Test purchase",
+    remoteAddress: remoteAddress,
+    merchantCategoryCode: 5411,
+    threeDSVersion: "2",
+    threeDSRedirectURL: `${pageURL}&acs=1`,
+  };
 }
+
+// Start the server
+app.listen(8012, () => {
+  console.log('Server is running on port 8012');
+});

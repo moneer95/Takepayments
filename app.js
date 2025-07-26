@@ -10,21 +10,16 @@ const { Gateway } = require('./gateway.js');
 
 const app = express();
 
-// ─── 0) Manual CORS & preflight ───────────────────────────────────────────────
-// MUST come before any other middleware or route!
-app.use((req, res, next) => {
-  // Allow your Next.js origin
-  res.setHeader('Access-Control-Allow-Origin',  'https://test.ea-dental.com');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  // Methods & headers we accept
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
-  if (req.method === 'OPTIONS') {
-    // CORS preflight
-    return res.sendStatus(200);
-  }
-  next();
-});
+// at the very top of app.js, before any routes:
+const cors = require('cors');
+
+app.use(cors({
+  origin: 'https://test.ea-dental.com',
+  credentials: true,
+  methods: ['GET','POST','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization']
+}));
+
 
 // ─── 1) Body parsing & sessions ───────────────────────────────────────────────
 app.use(bodyParser.json());
@@ -117,7 +112,7 @@ app.post('/', (req, res) => {
       action:          'SALE',
       merchantID:      getInitialFields(req).merchantID,
       threeDSRef:      req.session.threeDSRef,
-      threeDSResponse: Object.entries(post)
+      threeDSRexsponse: Object.entries(post)
         .map(([k, v]) => `[${k}]__EQUAL__SIGN__${v}`)
         .join('&')
     };

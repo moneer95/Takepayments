@@ -23,10 +23,18 @@ app.use((req, res, next) => {
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
-app.use(cors({
-  origin: 'https://test.ea-dental.com',  // your Next.js frontend
-  credentials: true
-}));
+const corsOptions = {
+  origin:        'https://test.ea-dental.com',  // your Next.js origin
+  credentials:   true,                          // allow cookies
+  methods:       ['GET','POST','OPTIONS'],      // allowed methods
+  allowedHeaders:['Content-Type','Authorization'] // if you need auth too
+};
+
+// enable CORS for all routes
+app.use(cors(corsOptions));
+
+// explicitly handle preflight across the board
+app.options('*', cors(corsOptions));
 
 app.use(session({
   genid: () => uuid(),

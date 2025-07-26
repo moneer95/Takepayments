@@ -177,7 +177,7 @@ function getInitialFields(req, pageURL, remoteAddress) {
         transactionUnique: uuid(),
         countryCode: 826,
         currencyCode: 826,
-        amount: totalAmountPence || 1001,
+        amount: 1,
         cardNumber: card.number || '4012001037141112',
         cardExpiryMonth: card.expiryMonth || 12,
         cardExpiryYear: card.expiryYear || 20,

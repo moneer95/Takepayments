@@ -1,160 +1,201 @@
-const http = require('http'); // Import Node.js core module
-const qs = require('querystring');
-
-const crypto = require('crypto');
-const httpBuildQuery = require('http-build-query');
+// app.js
+const express = require('express');
+const session = require('express-session');
+const bodyParser = require('body-parser');
+const cors = require('cors');
+const http = require('http');
 const url = require('url');
+const { v4: uuid } = require('uuid');
+
 const htmlUtils = require('./htmlutils.js');
+const { Gateway } = require('./gateway.js');
 
-const gateway = require('./gateway.js').Gateway;
-const assert = require('assert');
-// const merchantSecret = 'pass';
+const app = express();
 
-var server = http.createServer(function(req, res) { //create web server
-    const getParams = url.parse(req.url, true).query;
-    let body = '';
-    global.times = 0;
+// ─── 1) Middlewares ────────────────────────────────────────────────────────────
+// parse both application/x-www-form-urlencoded and application/json bodies
+app.use(bodyParser.urlencoded({ extended: false }));
+app.use(bodyParser.json());
 
-    if (req.method != 'POST') {
-        // Every other request after this is a POST.
-        body = htmlUtils.collectBrowserInfo(req);
-        sendResponse(body, res);
-    } else {
-        body = '';
+// enable CORS if your Next.js app is on a different origin
+app.use(cors({
+    origin: 'http://localhost:3000',  // adjust to your Next.js origin
+    credentials: true
+}));
 
-        req.on('data', function(data) {
-            body += data;
+// session support
+app.use(session({
+    genid: () => uuid(),
+    secret: process.env.SESSION_SECRET || 'change_me_to_something_secure',
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+        secure: false,      // set to true if you serve over HTTPS
+        sameSite: 'none'    // for cross-site cookies
+    }
+}));
 
-            // Too much POST data,
-            if (body.length > 1e6)
-                request.connection.destroy();
-        });
+// ─── 2) Init route: stash cart & card, return browser-info form ───────────────
+app.post('/init', (req, res) => {
+    const {
+        cart,
+        cardNumber,
+        cardExpiryMonth,
+        cardExpiryYear,
+        cardCVV,
+        customerName,
+        customerEmail,
+        customerAddress,
+        customerPostCode
+    } = req.body;
 
-        req.on('end', function() {
-            var post = qs.parse(body);
+    // 2.1 Stash cart
+    try {
+        req.session.cart = typeof cart === 'string'
+            ? JSON.parse(cart)
+            : cart;
+    } catch (e) {
+        console.warn('Init: invalid cart JSON', e);
+        req.session.cart = [];
+    }
 
-            // Collect browser information step - to present to the gateway
-            if (anyKeyStartsWith(post, 'browserInfo[')) {
-                let fields = getInitialFields('https://gateway.example.com/', '127.0.0.1');
-                for ([k, v] of Object.entries(post)) {
-                    fields[k.substr(12, k.length - 13)] = v;
-                }
+    // 2.2 Stash card and customer details
+    req.session.card = {
+        number: cardNumber,
+        expiryMonth: Number(cardExpiryMonth),
+        expiryYear: Number(cardExpiryYear),
+        cvv: cardCVV
+    };
+    req.session.customer = {
+        name: customerName,
+        email: customerEmail,
+        address: customerAddress,
+        postCode: customerPostCode
+    };
 
-                gateway.directRequest(fields).then((response) => {
-                    body = processResponseFields(response, gateway);
-                    sendResponse(body, res);
-                }).catch((error) => {
-                    console.error(error);
-                });
-                // Gateway responds with result from ACS - potentially featuring a
-                // challenge. Extract the method data, and pass back complete with
-                // threeDSRef previously provided to acknowledge the challenge.
-                // Also catches any continuation challenges and continues to post
-                // until we ultimately receive an auth code
-            } else if (!anyKeyStartsWith(post, 'threeDSResponse[')) {
-                let reqFields = {
-                    action: 'SALE',
-                    merchantID: getInitialFields(null, null).merchantID,
-                    threeDSRef: global.threeDSRef,
-                    threeDSResponse: '',
-                };
+    // 2.3 Kick off 3DS browser-info step
+    const body = htmlUtils.collectBrowserInfo(req);
+    res.send(htmlUtils.getWrapHTML(body));
+});
 
-                for ([k, v] of Object.entries(post)) {
-                    // http-build-query rightly converts subsequent = signs
-                    // but the gateway is expecting them to form nested
-                    // arrays. Due to this, we substitue them here and
-                    // replace later on.
-                    reqFields.threeDSResponse += '[' + k + ']' + '__EQUAL__SIGN__' + v + '&';
-                }
-                // Remove the last & for good measure
-                reqFields.threeDSResponse = reqFields.threeDSResponse.substr(0, reqFields.threeDSResponse.length - 1);
-                gateway.directRequest(reqFields).then((response) => {
-                    body = processResponseFields(response, gateway);
-                    sendResponse(body, res);
-                }).catch((error) => {
-                    console.error(error);
-                });
-            }
-        });
+// ─── 3) Browser-info GET handler for any other non-POST ───────────────────────
+app.all('*', (req, res, next) => {
+    if (req.method !== 'POST') {
+        const params = url.parse(req.url, true).query;
+
+        // (Optional) support GET-based stash if you still want that
+        if (params.cart) {
+            try { req.session.cart = JSON.parse(params.cart) }
+            catch (e) { console.warn('Invalid cart JSON', e) }
+        }
+        if (params.cardNumber) {
+            req.session.card = {
+                number: params.cardNumber,
+                expiryMonth: Number(params.cardExpiryMonth),
+                expiryYear: Number(params.cardExpiryYear),
+                cvv: params.cardCVV
+            };
+        }
+
+        const body = htmlUtils.collectBrowserInfo(req);
+        return res.send(htmlUtils.getWrapHTML(body));
+    }
+    next();
+});
+
+// ─── 4) POST handler — your existing 3DS flow ─────────────────────────────────
+app.post('*', (req, res) => {
+    const post = req.body;
+
+    // Step 1: browser-info response
+    if (anyKeyStartsWith(post, 'browserInfo[')) {
+        const fields = getInitialFields(req, 'https://gateway.example.com/', req.ip);
+        for (let [k, v] of Object.entries(post)) {
+            fields[k.slice(12, -1)] = v;
+        }
+        return Gateway.directRequest(fields)
+            .then(response => {
+                const body = processResponseFields(response, req);
+                res.send(htmlUtils.getWrapHTML(body));
+            })
+            .catch(err => {
+                console.error(err);
+                res.status(500).send('Gateway error');
+            });
+    }
+
+    // Step 2: handling the 3DS challenge response
+    if (!anyKeyStartsWith(post, 'threeDSResponse[')) {
+        const reqFields = {
+            action: 'SALE',
+            merchantID: getInitialFields(req).merchantID,
+            threeDSRef: req.session.threeDSRef,
+            threeDSResponse: Object.entries(post)
+                .map(([k, v]) => `[${k}]__EQUAL__SIGN__${v}`)
+                .join('&')
+        };
+
+        return Gateway.directRequest(reqFields)
+            .then(response => {
+                const body = processResponseFields(response, req);
+                res.send(htmlUtils.getWrapHTML(body));
+            })
+            .catch(err => {
+                console.error(err);
+                res.status(500).send('Gateway error');
+            });
     }
 });
 
-/*
-	anyKeyStartsWith
-
-	Helper function to find matching keys in an object
-*/
+// ─── 5) Helpers ────────────────────────────────────────────────────────────────
 function anyKeyStartsWith(haystack, needle) {
-    for ([k, v] of Object.entries(haystack)) {
-        if (k.startsWith(needle)) {
-            return true;
-        }
-    }
-
-    return false;
+    return Object.keys(haystack).some(k => k.startsWith(needle));
 }
 
-/*
-	processResponseFields
-
-	Helper function to monitor and act upon differing
-	gateway responses
-*/
-function processResponseFields(responseFields, gateway) {
-    switch (responseFields["responseCode"]) {
-        case "65802":
-            // TODO - Please change this to local session storage
-            global.threeDSRef = responseFields["threeDSRef"];
-            return htmlUtils.showFrameForThreeDS(responseFields);
-        case "0":
-            return "<p>Thank you for your payment.</p>"
+function processResponseFields(fields, req) {
+    switch (fields.responseCode) {
+        case '65802':
+            req.session.threeDSRef = fields.threeDSRef;
+            return htmlUtils.showFrameForThreeDS(fields);
+        case '0':
+            return '<p>Thank you for your payment.</p>';
         default:
-            return "<p>Failed to take payment: message=" + responseFields["responseMessage"] + " code=" + responseFields["responseCode"] + "</p>" //HTMLEntities.new.encode TODO
+            return `<p>Failed to take payment: message=${fields.responseMessage} code=${fields.responseCode}</p>`;
     }
 }
 
-/*
-	sendResponse
-
-	Helper function to wrap sending information
-	steps to the browser
-*/
-function sendResponse(body, res) {
-    res.writeHead(200, { 'Content-Type': 'text/html' });
-    res.write(htmlUtils.getWrapHTML(body));
-    res.end();
-}
-
-server.listen(8012);
-
-// This provides placeholder data for demonstration purposes only.
-function getInitialFields(pageURL, remoteAddress) {
-
-    let uniqid = Math.random().toString(36).substr(2, 10)
+function getInitialFields(req, pageURL, remoteAddress) {
+    const cart = req.session.cart || [];
+    const card = req.session.card || {};
+    const totalAmountPence = cart
+        .reduce((sum, item) => sum + item.price * item.quantity, 0) * 100;
 
     return {
-        "merchantID": "100856",
-        "action": "SALE",
-        "type": 1,
-        "transactionUnique": uniqid,
-        "countryCode": 826,
-        "currencyCode": 826,
-        "amount": 1001,
-        "cardNumber": "4012001037141112",
-        "cardExpiryMonth": 12,
-        "cardExpiryYear": 20,
-        "cardCVV": "083",
-        "customerName": "Test Customer",
-        "customerEmail": "test@testcustomer.com",
-        "customerAddress": "16 Test Street",
-        "customerPostCode": "TE15 5ST",
-        "orderRef": "Test purchase",
-
-        // The following fields are mandatory for 3DSv2 direct integration only
-        "remoteAddress": remoteAddress,
-
-        "merchantCategoryCode": 5411,
-        "threeDSVersion": "2",
-        "threeDSRedirectURL": pageURL + "&acs=1"
-    }
+        merchantID: '100856',
+        action: 'SALE',
+        type: 1,
+        transactionUnique: uuid(),
+        countryCode: 826,
+        currencyCode: 826,
+        amount: totalAmountPence || 1001,
+        cardNumber: card.number || '4012001037141112',
+        cardExpiryMonth: card.expiryMonth || 12,
+        cardExpiryYear: card.expiryYear || 20,
+        cardCVV: card.cvv || '083',
+        customerName: req.session.customer?.name || 'Test Customer',
+        customerEmail: req.session.customer?.email || 'test@test.com',
+        customerAddress: req.session.customer?.address || '16 Test Street',
+        customerPostCode: req.session.customer?.postCode || 'TE15 5ST',
+        orderRef: 'Test purchase',
+        remoteAddress,
+        merchantCategoryCode: 5411,
+        threeDSVersion: '2',
+        threeDSRedirectURL: (pageURL || '') + '&acs=1'
+    };
 }
+
+// ─── 6) Launch server ─────────────────────────────────────────────────────────
+const server = http.createServer(app);
+server.listen(8012, () => {
+    console.log('Takepayments app listening on port 8012');
+});

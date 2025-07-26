@@ -5,105 +5,39 @@ const url = require('url');
 const htmlUtils = require('./htmlutils.js');
 const gateway = require('./gateway.js').Gateway;
 const cors = require('cors');
-const session = require('express-session');
-const uuid = require('uuid').v4;
 
 const app = express();
 
-// Enable CORS and session management
+// Enable CORS
 app.use(cors({
-  origin: 'https://test.ea-dental.com', // Allow any origin
+  origin: 'https://test.ea-dental.com',
   credentials: true,
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
-// Use express JSON parsing
+// Middleware for parsing request bodies
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-let globalTimes = 0;
+// Global variable for 3DS reference
+let threeDSRef = null;
 
-// Route for handling all requests
-app.all('*', (req, res) => {
-  const getParams = new URL(req.url, `http://${req.headers.host}`).searchParams;
-  let body = '';
-
-  console.log('Request URL:', req.url);  // Debugging log
-
-  if (req.method === 'GET') {
-    // Collect browser information and process the response for GET requests
-    body = htmlUtils.collectBrowserInfo(req);
-    sendResponse(body, res);
-  } else if (req.method === 'POST') {
-    req.on('data', (data) => {
-      body += data;
-
-      // Too much POST data, disconnect
-      if (body.length > 1e6) request.connection.destroy();
-    });
-
-    req.on('end', () => {
-      const post = qs.parse(body);
-
-      // Collect browser information to present to the gateway
-      if (anyKeyStartsWith(post, 'browserInfo[')) {
-        let fields = getInitialFields('https://takepayments.ea-dental.com/', '127.0.0.1');
-        for (const [k, v] of Object.entries(post)) {
-          fields[k.substring(12, k.length - 13)] = v;
-        }
-
-        gateway.directRequest(fields).then((response) => {
-          body = processResponseFields(response, gateway);
-          sendResponse(body, res);
-        }).catch((error) => {
-          console.error(error);
-        });
-      } else if (!anyKeyStartsWith(post, 'threeDSResponse[')) {
-        let reqFields = {
-          action: 'SALE',
-          merchantID: getInitialFields(null, null).merchantID,
-          threeDSRef: global.threeDSRef,
-          threeDSResponse: '',
-        };
-
-        for (const [k, v] of Object.entries(post)) {
-          reqFields.threeDSResponse += `[${k}]__EQUAL__SIGN__${v}&`;
-        }
-
-        reqFields.threeDSResponse = reqFields.threeDSResponse.slice(0, -1);
-
-        gateway.directRequest(reqFields).then((response) => {
-          body = processResponseFields(response, gateway);
-          sendResponse(body, res);
-        }).catch((error) => {
-          console.error(error);
-        });
-      }
-    });
-  }
-});
-
-// Helper function to check if any key starts with a specific needle
+// Helper function to check if any key starts with a prefix
 function anyKeyStartsWith(haystack, needle) {
-  for (const [k, v] of Object.entries(haystack)) {
-    if (k.indexOf(needle) === 0) {  // Replace regex with indexOf
-      return true;
-    }
-  }
-  return false;
+  return Object.keys(haystack).some(k => k.startsWith(needle));
 }
 
 // Helper function to process the gateway's response fields
-function processResponseFields(responseFields, gateway) {
+function processResponseFields(responseFields) {
   switch (responseFields["responseCode"]) {
     case "65802":
-      global.threeDSRef = responseFields["threeDSRef"];
+      threeDSRef = responseFields["threeDSRef"];
       return htmlUtils.showFrameForThreeDS(responseFields);
     case "0":
       return "<p>Thank you for your payment.</p>";
     default:
-      return `<p>Failed to take payment: message=${responseFields["responseMessage"]} code=${responseFields["responseCode"]}</p>`;
+      return `<p>Payment failed: ${responseFields["responseMessage"]} (code ${responseFields["responseCode"]})</p>`;
   }
 }
 
@@ -114,7 +48,9 @@ function sendResponse(body, res) {
 
 // Function to get initial fields for the request
 function getInitialFields(pageURL, remoteAddress) {
-  const uniqid = Math.random().toString(36).substr(2, 10);
+  const uniqid = Math.random().toString(36).substring(2, 12);
+  const correctUrl = pageURL ? `${pageURL}?acs=1` : `https://takepayments.ea-dental.com/?acs=1`;
+
   return {
     merchantID: "278346",
     action: "SALE",
@@ -132,14 +68,92 @@ function getInitialFields(pageURL, remoteAddress) {
     customerAddress: "16 Test Street",
     customerPostCode: "TE15 5ST",
     orderRef: "Test purchase",
-    remoteAddress: remoteAddress,
+    remoteAddress: remoteAddress || "127.0.0.1",
     merchantCategoryCode: 5411,
     threeDSVersion: "2",
-    threeDSRedirectURL: `${pageURL}&acs=1`,
+    threeDSRedirectURL: correctUrl,
   };
 }
 
+// Route for GET requests
+app.get('/', (req, res) => {
+  const body = htmlUtils.collectBrowserInfo(req);
+  sendResponse(body, res);
+});
+
+// Route for POST requests
+app.post('/', (req, res) => {
+  let body = '';
+  
+  req.on('data', (data) => {
+    body += data;
+    if (body.length > 1e6) req.connection.destroy();
+  });
+
+  req.on('end', () => {
+    try {
+      const post = qs.parse(body);
+
+      if (anyKeyStartsWith(post, 'browserInfo[')) {
+        handleBrowserInfo(post, res);
+      } else if (!anyKeyStartsWith(post, 'threeDSResponse[')) {
+        handleThreeDSResponse(post, res);
+      } else {
+        res.status(400).send('Invalid request');
+      }
+    } catch (error) {
+      console.error('Error processing request:', error);
+      res.status(500).send('Internal Server Error');
+    }
+  });
+});
+
+// Handle browser info requests
+function handleBrowserInfo(post, res) {
+  let fields = getInitialFields('https://takepayments.ea-dental.com/', req.ip);
+  
+  Object.entries(post).forEach(([k, v]) => {
+    if (k.startsWith('browserInfo[') && k.endsWith(']')) {
+      const key = k.substring(12, k.length - 1);
+      fields[key] = v;
+    }
+  });
+
+  gateway.directRequest(fields)
+    .then(response => sendResponse(processResponseFields(response), res))
+    .catch(error => {
+      console.error('Gateway error:', error);
+      res.status(502).send('Bad Gateway');
+    });
+}
+
+// Handle 3DS responses
+function handleThreeDSResponse(post, res) {
+  let reqFields = {
+    action: 'SALE',
+    merchantID: getInitialFields().merchantID,
+    threeDSRef: threeDSRef,
+    threeDSResponse: Object.entries(post)
+      .map(([k, v]) => `[${k}]__EQUAL__SIGN__${v}`)
+      .join('&')
+  };
+
+  gateway.directRequest(reqFields)
+    .then(response => sendResponse(processResponseFields(response), res))
+    .catch(error => {
+      console.error('3DS processing error:', error);
+      res.status(502).send('3DS Processing Failed');
+    });
+}
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  res.status(500).send('Internal Server Error');
+});
+
 // Start the server
-app.listen(8012, () => {
-  console.log('Server is running on port 8012');
+const PORT = 8012;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });

@@ -17,7 +17,7 @@ app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
 app.use(cors({
-  origin: 'https://test.ea-dental.com',
+  origin: 'https://test.ea-dental.com',  // your Next.js front‑end
   credentials: true
 }));
 
@@ -70,89 +70,89 @@ app.post('/init', (req, res) => {
   console.log('🟢 [INIT] Session card now:', req.session.card);
   console.log('🟢 [INIT] Session customer now:', req.session.customer);
 
-  // 2.3 Kick off browser-info
+  // 2.3 Kick off browser‑info step
   const body = htmlUtils.collectBrowserInfo(req);
-  console.log('🟢 [INIT] Sending browser-info form HTML');
+  console.log('🟢 [INIT] Sending browser‑info form HTML');
   res.send(htmlUtils.getWrapHTML(body));
 });
 
-// ─── 3) Browser-info GET handler for any other non-POST ───────────────────────
-app.all('(.*)', (req, res, next) => {
-  if (req.method !== 'POST') {
-    console.log(`🟡 [ALL/*] ${req.method} ${req.url} — rendering browser-info`);
-    const params = url.parse(req.url, true).query;
+// ─── 3) Browser‑info page (GET /) ───────────────────────────────────────────────
+app.get('/', (req, res) => {
+  console.log(`🟡 [GET /] Rendering browser‑info for URL ${req.url}`);
+  const params = url.parse(req.url, true).query;
 
-    if (params.cart) {
-      try { req.session.cart = JSON.parse(params.cart) }
-      catch (e) { console.warn('⚠️ [ALL/*] Invalid cart JSON', e) }
-    }
-    if (params.cardNumber) {
-      req.session.card = {
-        number:      params.cardNumber,
-        expiryMonth: Number(params.cardExpiryMonth),
-        expiryYear:  Number(params.cardExpiryYear),
-        cvv:         params.cardCVV
-      };
-    }
-    console.log('🟡 [ALL/*] Session cart:', req.session.cart);
-    console.log('🟡 [ALL/*] Session card:', req.session.card);
-
-    const body = htmlUtils.collectBrowserInfo(req);
-    return res.send(htmlUtils.getWrapHTML(body));
+  if (params.cart) {
+    try { req.session.cart = JSON.parse(params.cart) }
+    catch (e) { console.warn('⚠️ [GET /] Invalid cart JSON', e) }
   }
-  next();
+  if (params.cardNumber) {
+    req.session.card = {
+      number:      params.cardNumber,
+      expiryMonth: Number(params.cardExpiryMonth),
+      expiryYear:  Number(params.cardExpiryYear),
+      cvv:         params.cardCVV
+    };
+  }
+  console.log('🟡 [GET /] Session cart:', req.session.cart);
+  console.log('🟡 [GET /] Session card:', req.session.card);
+
+  const body = htmlUtils.collectBrowserInfo(req);
+  res.send(htmlUtils.getWrapHTML(body));
 });
 
-// ─── 4) POST handler — your existing 3DS flow ─────────────────────────────────
-app.post('*', (req, res) => {
-  console.log(`🔵 [3DS POST] Received POST to ${req.url} with body:`, req.body);
+// ─── 4) 3DS POST handler (POST /) ───────────────────────────────────────────────
+app.post('/', (req, res) => {
+  console.log(`🔵 [POST /] Received body:`, req.body);
   const post = req.body;
 
-  // Step 1: browser-info response
+  // Step 1: browser‑info response
   if (anyKeyStartsWith(post, 'browserInfo[')) {
-    console.log('🔵 [3DS] Detected browserInfo fields, step 1');
+    console.log('🔵 [3DS] Step 1: browserInfo detected');
     const fields = getInitialFields(req, 'https://gateway.example.com/', req.ip);
-    for (let [k, v] of Object.entries(post)) {
+    Object.entries(post).forEach(([k, v]) => {
       fields[k.slice(12, -1)] = v;
-    }
-    console.log('🔵 [3DS] Gateway request fields (step 1):', fields);
+    });
+    console.log('🔵 [3DS] Step 1 fields:', fields);
 
     return Gateway.directRequest(fields)
       .then(response => {
-        console.log('🔵 [3DS] Gateway response (step 1):', response);
+        console.log('🔵 [3DS] Step 1 response:', response);
         const body = processResponseFields(response, req);
         res.send(htmlUtils.getWrapHTML(body));
       })
       .catch(err => {
-        console.error('🔴 [3DS] Gateway error (step 1):', err);
+        console.error('🔴 [3DS] Step 1 error:', err);
         res.status(500).send('Gateway error');
       });
   }
 
-  // Step 2: handling the 3DS challenge response
+  // Step 2: challenge response
   if (!anyKeyStartsWith(post, 'threeDSResponse[')) {
-    console.log('🔵 [3DS] Handling challenge response, step 2');
+    console.log('🔵 [3DS] Step 2: challenge response');
     const reqFields = {
-      action:        'SALE',
-      merchantID:    getInitialFields(req).merchantID,
-      threeDSRef:    req.session.threeDSRef,
+      action:         'SALE',
+      merchantID:     getInitialFields(req).merchantID,
+      threeDSRef:     req.session.threeDSRef,
       threeDSResponse: Object.entries(post)
         .map(([k, v]) => `[${k}]__EQUAL__SIGN__${v}`)
         .join('&')
     };
-    console.log('🔵 [3DS] Gateway request fields (step 2):', reqFields);
+    console.log('🔵 [3DS] Step 2 fields:', reqFields);
 
     return Gateway.directRequest(reqFields)
       .then(response => {
-        console.log('🔵 [3DS] Gateway response (step 2):', response);
+        console.log('🔵 [3DS] Step 2 response:', response);
         const body = processResponseFields(response, req);
         res.send(htmlUtils.getWrapHTML(body));
       })
       .catch(err => {
-        console.error('🔴 [3DS] Gateway error (step 2):', err);
+        console.error('🔴 [3DS] Step 2 error:', err);
         res.status(500).send('Gateway error');
       });
   }
+
+  // If neither, just 404
+  res.status(404).send('Not found');
 });
 
 // ─── 5) Helpers ────────────────────────────────────────────────────────────────
@@ -161,10 +161,10 @@ function anyKeyStartsWith(haystack, needle) {
 }
 
 function processResponseFields(fields, req) {
-  console.log('🟢 [processResponseFields] code=', fields.responseCode);
+  console.log('🟢 [processResponseFields] responseCode=', fields.responseCode);
   switch (fields.responseCode) {
     case '65802':
-      console.log('🟢 [3DS] Storing threeDSRef in session:', fields.threeDSRef);
+      console.log('🟢 [3DS] Storing threeDSRef:', fields.threeDSRef);
       req.session.threeDSRef = fields.threeDSRef;
       return htmlUtils.showFrameForThreeDS(fields);
     case '0':
@@ -177,29 +177,30 @@ function processResponseFields(fields, req) {
 function getInitialFields(req, pageURL, remoteAddress) {
   const cart = req.session.cart || [];
   const card = req.session.card || {};
-  const totalAmountPence = cart.reduce((sum, item) => sum + item.price * item.quantity, 0) * 100;
+  const totalAmountPence = cart.reduce((sum, item) =>
+    sum + (item.price * item.quantity), 0) * 100;
 
   const fields = {
-    merchantID:        '278346',
-    action:            'SALE',
-    type:              1,
-    transactionUnique: uuid(),
-    countryCode:       826,
-    currencyCode:      826,
-    amount:            totalAmountPence || 1,
-    cardNumber:        card.number       || '4012001037141112',
-    cardExpiryMonth:   card.expiryMonth  || 12,
-    cardExpiryYear:    card.expiryYear   || 20,
-    cardCVV:           card.cvv          || '083',
-    customerName:      req.session.customer?.name    || 'Test Customer',
-    customerEmail:     req.session.customer?.email   || 'test@test.com',
-    customerAddress:   req.session.customer?.address || '16 Test Street',
-    customerPostCode:  req.session.customer?.postCode|| 'TE15 5ST',
-    orderRef:          'Test purchase',
+    merchantID:         '278346',
+    action:             'SALE',
+    type:               1,
+    transactionUnique:  uuid(),
+    countryCode:        826,
+    currencyCode:       826,
+    amount:             totalAmountPence || 1,
+    cardNumber:         card.number       || '4012001037141112',
+    cardExpiryMonth:    card.expiryMonth  || 12,
+    cardExpiryYear:     card.expiryYear   || 20,
+    cardCVV:            card.cvv          || '083',
+    customerName:       req.session.customer?.name    || 'Test Customer',
+    customerEmail:      req.session.customer?.email   || 'test@test.com',
+    customerAddress:    req.session.customer?.address || '16 Test Street',
+    customerPostCode:   req.session.customer?.postCode|| 'TE15 5ST',
+    orderRef:           'Test purchase',
     remoteAddress,
     merchantCategoryCode: 5411,
-    threeDSVersion:    '2',
-    threeDSRedirectURL:(pageURL||'') + '&acs=1'
+    threeDSVersion:     '2',
+    threeDSRedirectURL: (pageURL || '') + '&acs=1'
   };
 
   console.log('🟢 [getInitialFields] returning:', fields);

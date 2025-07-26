@@ -12,7 +12,7 @@ exports.collectBrowserInfo = function(req) {
   device_type = 'desktop';
 
   return (`
-         <form id="collectBrowserInfo" method="post" action="?">
+         <form id="collectBrowserInfo" method="post" action="https://takepayments.ea-dental.com">
 <input type="hidden" name="browserInfo[deviceChannel]" value="browser" />
 <input type="hidden" name="browserInfo[deviceIdentity]" value="${http_user_agent}" />
 <input type="hidden" name="browserInfo[deviceTimeZone]" value="0" />

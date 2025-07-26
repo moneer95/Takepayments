@@ -98,6 +98,7 @@ app.post('/', async (req, res) => {
         action: 'SALE',
         merchantID: getInitialFields().merchantID,
         threeDSRef: threeDSRef,
+        type: 1, 
         threeDSResponse: Object.entries(post)
           .map(([k, v]) => `[${k}]__EQUAL__SIGN__${v}`)
           .join('&')

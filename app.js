@@ -35,7 +35,7 @@ var server = http.createServer(function(req, res) { //create web server
 
             // Collect browser information step - to present to the gateway
             if (anyKeyStartsWith(post, 'browserInfo[')) {
-                let fields = getInitialFields('https://d44cf4d997d1.ngrok-free.app/', '127.0.0.1');
+                let fields = getInitialFields('https://takepayments.ea-dental.com/', '127.0.0.1');
                 for ([k, v] of Object.entries(post)) {
                     fields[k.substr(12, k.length - 13)] = v;
                 }

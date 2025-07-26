@@ -2,7 +2,7 @@ const express = require('express');
 const qs = require('querystring');
 const crypto = require('crypto');
 const url = require('url');
-const htmlUtils = require('./htmlUtils.js');
+const htmlUtils = require('./htmlutils.js');
 const gateway = require('./gateway.js').Gateway;
 const cors = require('cors');
 

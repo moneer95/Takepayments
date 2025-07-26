@@ -183,6 +183,30 @@ function getInitialFields(req, pageURL, remoteAddr) {
   return f;
 }
 
+// ─── 6) GET /test — simple test route returning HTML ───────────────────────────
+app.get('/test', (req, res) => {
+  console.log('🟡 [GET /test] Test route hit');
+  
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Test Page</title>
+      </head>
+      <body>
+        <h1>Welcome to the Test Page</h1>
+        <p>This is a simple test route to check if the server is working correctly.</p>
+      </body>
+    </html>
+  `;
+  
+  // Send the HTML content as the response
+  res.send(htmlContent);
+});
+
+
 // ─── 6) Launch server ─────────────────────────────────────────────────────────
 http.createServer(app).listen(8012, () => {
   console.log('🚀 Takepayments listening on port 8012');

@@ -99,6 +99,9 @@ app.post('/', async (req, res) => {
         merchantID: getInitialFields().merchantID,
         threeDSRef: threeDSRef,
         type: 1, 
+        countryCode: 826,
+        currencyCode: 826,
+        amount: 1,    
         threeDSResponse: Object.entries(post)
           .map(([k, v]) => `[${k}]__EQUAL__SIGN__${v}`)
           .join('&')

@@ -45,6 +45,10 @@ function sendResponse(res, body) {
 function getInitialFields(pageURL, remoteAddress) {
   let uniqid = Math.random().toString(36).substr(2, 10);
   
+  // Correctly format the URL with `?` if there are no parameters yet or `&` if parameters already exist
+  const correctUrl = pageURL ? `${pageURL}${pageURL.includes('?') ? '&' : '?'}acs=1` : `https://takepayments.ea-dental.com/?acs=1`;
+
+
   return {
     "merchantID": "278346",
     "action": "SALE",
@@ -65,7 +69,7 @@ function getInitialFields(pageURL, remoteAddress) {
     "remoteAddress": remoteAddress,
     "merchantCategoryCode": 5411,
     "threeDSVersion": "2",
-    "threeDSRedirectURL": pageURL + "&acs=1"
+    "threeDSRedirectURL": correctUrl
   };
 }
 

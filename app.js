@@ -2,9 +2,7 @@
 const express      = require('express');
 const session      = require('express-session');
 const bodyParser   = require('body-parser');
-const cors         = require('cors');
 const http         = require('http');
-const { URL }      = require('url');
 const { v4: uuid } = require('uuid');
 
 const htmlUtils = require('./htmlutils.js');
@@ -12,31 +10,25 @@ const { Gateway } = require('./gateway.js');
 
 const app = express();
 
-const corsOptions = {
-  origin:        'https://test.ea-dental.com',  // your Next.js origin
-  credentials:   true,                          // allow cookies
-  methods:       ['GET','POST','OPTIONS'],      // allowed methods
-  allowedHeaders:['Content-Type','Authorization'] // if you need auth too
-};
-
-// enable CORS for all routes
-app.use(cors(corsOptions));
-
-// explicitly handle preflight across the board
-app.options('*', cors(corsOptions));
-
-// right after `const app = express();`
+// ─── 0) Manual CORS & preflight ───────────────────────────────────────────────
+// MUST come before any other middleware or route!
 app.use((req, res, next) => {
-  console.log(`➡️  [${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
+  // Allow your Next.js origin
+  res.setHeader('Access-Control-Allow-Origin',  'https://test.ea-dental.com');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  // Methods & headers we accept
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+  if (req.method === 'OPTIONS') {
+    // CORS preflight
+    return res.sendStatus(200);
+  }
   next();
 });
 
-
-// ─── 1) Middlewares ────────────────────────────────────────────────────────────
-app.use(bodyParser.urlencoded({ extended: false }));
+// ─── 1) Body parsing & sessions ───────────────────────────────────────────────
 app.use(bodyParser.json());
-
-
+app.use(bodyParser.urlencoded({ extended: false }));
 app.use(session({
   genid: () => uuid(),
   secret: process.env.SESSION_SECRET || 'change_me',
@@ -45,77 +37,72 @@ app.use(session({
   cookie: { secure: false, sameSite: 'none' }
 }));
 
-// ─── 2) POST /init ─ stash cart/card, return browser‑info form ────────────────
+// ─── 2) POST /init — stash cart & card, render browser‑info form ─────────────
 app.post('/init', (req, res) => {
   console.log('🟢 [INIT] /init body:', req.body);
   const {
-    cart, cardNumber, cardExpiryMonth,
-    cardExpiryYear, cardCVV,
-    customerName, customerEmail,
-    customerAddress, customerPostCode
+    cart,
+    cardNumber, cardExpiryMonth, cardExpiryYear, cardCVV,
+    customerName, customerEmail, customerAddress, customerPostCode
   } = req.body;
 
-  // stash cart
-  try { req.session.cart = typeof cart === 'string' ? JSON.parse(cart) : cart }
-  catch (e) {
+  // 2.1 stash cart
+  try {
+    req.session.cart = typeof cart === 'string' ? JSON.parse(cart) : cart;
+  } catch (e) {
     console.warn('⚠️ [INIT] bad cart JSON', e);
     req.session.cart = [];
   }
   console.log('🟢 [INIT] session.cart =', req.session.cart);
 
-  // stash card + customer
-  req.session.card = { number: cardNumber, expiryMonth: +cardExpiryMonth, expiryYear: +cardExpiryYear, cvv: cardCVV };
-  req.session.customer = { name: customerName, email: customerEmail, address: customerAddress, postCode: customerPostCode };
+  // 2.2 stash card + customer
+  req.session.card = {
+    number:      cardNumber,
+    expiryMonth: +cardExpiryMonth,
+    expiryYear:  +cardExpiryYear,
+    cvv:         cardCVV
+  };
+  req.session.customer = {
+    name:     customerName,
+    email:    customerEmail,
+    address:  customerAddress,
+    postCode: customerPostCode
+  };
   console.log('🟢 [INIT] session.card =', req.session.card);
   console.log('🟢 [INIT] session.customer =', req.session.customer);
 
-  // return the hidden browser‑info form
-  const body = htmlUtils.collectBrowserInfo(req);
+  // 2.3 render the hidden browser‑info form
+  const formHtml = htmlUtils.getWrapHTML(htmlUtils.collectBrowserInfo(req));
   console.log('🟢 [INIT] sending browser‑info form');
-  res.send(htmlUtils.getWrapHTML(body));
+  res.send(formHtml);
 });
 
-// ─── 3) GET / ─ render browser‑info form if someone hits /directly ─────────────
+// ─── 3) GET / — also render browser‑info if someone hits the root directly ─────
 app.get('/', (req, res) => {
-  console.log('🟡 [GET /] url:', req.url);
-  // optional: allow ?cart=... or ?cardNumber=...
-  const q = new URL(req.protocol + '://' + req.get('host') + req.originalUrl).searchParams;
-  if (q.has('cart')) {
-    try { req.session.cart = JSON.parse(q.get('cart')) } 
-    catch (e) { console.warn('⚠️ [GET /] bad cart JSON', e) }
-  }
-  if (q.has('cardNumber')) {
-    req.session.card = {
-      number:      q.get('cardNumber'),
-      expiryMonth: +q.get('cardExpiryMonth'),
-      expiryYear:  +q.get('cardExpiryYear'),
-      cvv:         q.get('cardCVV')
-    };
-  }
-  console.log('🟡 [GET /] session.cart =', req.session.cart);
-  console.log('🟡 [GET /] session.card =', req.session.card);
-
-  const body = htmlUtils.collectBrowserInfo(req);
-  res.send(htmlUtils.getWrapHTML(body));
+  console.log('🟡 [GET /] URL:', req.originalUrl);
+  // (Optional) allow passing cart/card via querystring here if you still want
+  const formHtml = htmlUtils.getWrapHTML(htmlUtils.collectBrowserInfo(req));
+  res.send(formHtml);
 });
 
-// ─── 4) POST / ─ your 3DS step‑1 & step‑2 flow ────────────────────────────────
+// ─── 4) POST / — your two‑step 3DS flow ───────────────────────────────────────
 app.post('/', (req, res) => {
   console.log('🔵 [POST /] body=', req.body);
   const post = req.body;
 
-  // Step 1: browser‑info submission
+  // Step 1: browser‑info submission
   if (anyKeyStartsWith(post, 'browserInfo[')) {
-    console.log('🔵 [3DS] step 1');
+    console.log('🔵 [3DS] step 1 detected');
     const fields = getInitialFields(req, 'https://gateway.example.com/', req.ip);
-    Object.entries(post).forEach(([k,v]) => {
+    Object.entries(post).forEach(([k, v]) => {
       fields[k.slice(12, -1)] = v;
     });
     console.log('🔵 [3DS] fields1=', fields);
     return Gateway.directRequest(fields)
       .then(r => {
         console.log('🔵 [3DS] resp1=', r);
-        res.send(htmlUtils.getWrapHTML(processResponseFields(r, req)));
+        const html = htmlUtils.getWrapHTML(processResponseFields(r, req));
+        res.send(html);
       })
       .catch(err => {
         console.error('🔴 [3DS] err1=', err);
@@ -123,22 +110,23 @@ app.post('/', (req, res) => {
       });
   }
 
-  // Step 2: challenge response
+  // Step 2: challenge response
   if (!anyKeyStartsWith(post, 'threeDSResponse[')) {
-    console.log('🔵 [3DS] step 2');
+    console.log('🔵 [3DS] step 2 challenge');
     const reqFields = {
-      action:         'SALE',
-      merchantID:     getInitialFields(req).merchantID,
-      threeDSRef:     req.session.threeDSRef,
+      action:          'SALE',
+      merchantID:      getInitialFields(req).merchantID,
+      threeDSRef:      req.session.threeDSRef,
       threeDSResponse: Object.entries(post)
-        .map(([k,v])=>`[${k}]__EQUAL__SIGN__${v}`)
+        .map(([k, v]) => `[${k}]__EQUAL__SIGN__${v}`)
         .join('&')
     };
     console.log('🔵 [3DS] fields2=', reqFields);
     return Gateway.directRequest(reqFields)
       .then(r => {
         console.log('🔵 [3DS] resp2=', r);
-        res.send(htmlUtils.getWrapHTML(processResponseFields(r, req)));
+        const html = htmlUtils.getWrapHTML(processResponseFields(r, req));
+        res.send(html);
       })
       .catch(err => {
         console.error('🔴 [3DS] err2=', err);
@@ -146,18 +134,18 @@ app.post('/', (req, res) => {
       });
   }
 
-  // nothing matched
+  // neither step matched
   res.status(404).send('Not Found');
 });
 
 // ─── 5) Helpers ────────────────────────────────────────────────────────────────
-function anyKeyStartsWith(hay, needle) {
-  return Object.keys(hay).some(k => k.startsWith(needle));
+function anyKeyStartsWith(obj, needle) {
+  return Object.keys(obj).some(k => k.startsWith(needle));
 }
 
 function processResponseFields(fields, req) {
-  console.log('🟢 [procFields] code=', fields.responseCode);
-  switch(fields.responseCode) {
+  console.log('🟢 [processResponseFields] code=', fields.responseCode);
+  switch (fields.responseCode) {
     case '65802':
       console.log('🟢 [3DS] storing threeDSRef=', fields.threeDSRef);
       req.session.threeDSRef = fields.threeDSRef;
@@ -172,8 +160,9 @@ function processResponseFields(fields, req) {
 function getInitialFields(req, pageURL, remoteAddr) {
   const cart = req.session.cart || [];
   const card = req.session.card || {};
-  const total = cart.reduce((s,i)=>s + i.price*i.quantity,0)*100;
-  const data = {
+  const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0) * 100;
+
+  const f = {
     merchantID:         '278346',
     action:             'SALE',
     type:               1,
@@ -195,9 +184,11 @@ function getInitialFields(req, pageURL, remoteAddr) {
     threeDSVersion:     '2',
     threeDSRedirectURL: (pageURL||'') + '&acs=1'
   };
-  console.log('🟢 [initFields]=', data);
-  return data;
+  console.log('🟢 [getInitialFields]=', f);
+  return f;
 }
 
-// ─── 6) Launch ────────────────────────────────────────────────────────────────
-http.createServer(app).listen(8012,()=>console.log('🚀 listening on 8012'));
+// ─── 6) Launch server ─────────────────────────────────────────────────────────
+http.createServer(app).listen(8012, () => {
+  console.log('🚀 Takepayments listening on port 8012');
+});

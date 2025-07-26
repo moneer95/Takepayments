@@ -70,42 +70,68 @@ app.get('/', (req, res) => {
   }
 });
 
+// Enhanced POST handler
 app.post('/', (req, res) => {
   let body = '';
+  const requestId = req.requestId;
+  
+  debug(`[${requestId}] Starting POST processing`);
   
   req.on('data', (data) => {
     body += data;
     if (body.length > 1e6) {
-      debug(`[${req.requestId}] Request too large`);
+      debug(`[${requestId}] Request body too large (${body.length} bytes)`);
       req.connection.destroy();
+      return;
     }
   });
 
   req.on('end', () => {
+    debug(`[${requestId}] Received complete POST body (${body.length} bytes)`);
+    verboseDebug(`[${requestId}] Raw POST body:`, body);
+
     try {
       const post = qs.parse(body);
-      verboseDebug(`[${req.requestId}] POST data:`, post);
+      verboseDebug(`[${requestId}] Parsed POST data:`, post);
+
+      if (!post || Object.keys(post).length === 0) {
+        debug(`[${requestId}] Empty POST data received`);
+        return res.status(400).json({error: "Empty POST data"});
+      }
 
       if (anyKeyStartsWith.call({req}, post, 'browserInfo[')) {
+        debug(`[${requestId}] Processing browser info submission`);
         handleBrowserInfo(post, req, res);
-      } else if (!anyKeyStartsWith.call({req}, post, 'threeDSResponse[')) {
+      } else if (anyKeyStartsWith.call({req}, post, 'threeDSResponse[')) {
+        debug(`[${requestId}] Processing 3DS response`);
         handleThreeDSResponse(post, req, res);
       } else {
-        res.status(400).send('Invalid request');
+        debug(`[${requestId}] Unknown POST data format`);
+        res.status(400).json({error: "Invalid request format"});
       }
     } catch (error) {
-      console.error(`[${req.requestId}] POST Error:`, error);
-      res.status(500).send('Internal Server Error');
+      console.error(`[${requestId}] POST Processing Error:`, error);
+      res.status(500).json({error: "Internal server error", details: error.message});
     }
+  });
+
+  req.on('error', (err) => {
+    console.error(`[${requestId}] POST Request Error:`, err);
+    res.status(500).json({error: "Request processing error", details: err.message});
   });
 });
 
-// Handler functions
+// Enhanced browser info handler
 function handleBrowserInfo(post, req, res) {
+  const requestId = req.requestId;
+  
   try {
-    let fields = getInitialFields('https://takepayments.ea-dental.com/', req.ip);
-    verboseDebug(`[${req.requestId}] Initial fields:`, fields);
+    debug(`[${requestId}] Building browser info request`);
     
+    let fields = getInitialFields('https://takepayments.ea-dental.com/', req.ip);
+    verboseDebug(`[${requestId}] Initial fields:`, fields);
+    
+    // Process browser info fields
     Object.entries(post).forEach(([k, v]) => {
       if (k.startsWith('browserInfo[') && k.endsWith(']')) {
         const key = k.substring(12, k.length - 1);
@@ -113,21 +139,34 @@ function handleBrowserInfo(post, req, res) {
       }
     });
 
-    debug(`[${req.requestId}] Sending to gateway`);
+    debug(`[${requestId}] Sending to payment gateway`);
+    verboseDebug(`[${requestId}] Final request fields:`, fields);
+    
     gateway.directRequest(fields)
       .then(response => {
-        verboseDebug(`[${req.requestId}] Gateway response:`, response);
-        sendResponse(processResponseFields(response, req), res, req);
+        debug(`[${requestId}] Received gateway response`);
+        verboseDebug(`[${requestId}] Gateway response:`, response);
+        
+        const processed = processResponseFields(response, req);
+        sendResponse(processed, res, req);
       })
       .catch(error => {
-        console.error(`[${req.requestId}] Gateway error:`, error);
-        res.status(502).send('Bad Gateway');
+        console.error(`[${requestId}] Gateway request failed:`, error);
+        res.status(502).json({
+          error: "Payment gateway error",
+          details: error.message
+        });
       });
   } catch (err) {
-    console.error(`[${req.requestId}] BrowserInfo Error:`, err);
-    res.status(500).send('Internal Server Error');
+    console.error(`[${requestId}] BrowserInfo processing failed:`, err);
+    res.status(500).json({
+      error: "Internal server error",
+      details: err.message
+    });
   }
 }
+
+
 
 function handleThreeDSResponse(post, req, res) {
   try {
@@ -192,8 +231,14 @@ function getInitialFields(pageURL, remoteAddress) {
 
 // Error handling
 app.use((err, req, res, next) => {
-  console.error(`[${req.requestId}] Unhandled Error:`, err);
-  res.status(500).send('Internal Server Error');
+  const requestId = req.requestId || 'unknown';
+  console.error(`[${requestId}] Unhandled Application Error:`, err);
+  
+  res.status(500).json({
+    error: "Internal server error",
+    requestId: requestId,
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Start server

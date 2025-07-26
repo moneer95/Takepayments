@@ -4,7 +4,6 @@ const crypto = require('crypto');
 const url = require('url');
 const htmlUtils = require('./htmlutils.js');
 const gateway = require('./gateway.js').Gateway;
-const assert = require('assert');
 const cors = require('cors');
 const session = require('express-session');
 const uuid = require('uuid').v4;
@@ -30,8 +29,7 @@ app.all('*', (req, res) => {
   const getParams = new URL(req.url, `http://${req.headers.host}`).searchParams;
   let body = '';
 
-  // Log the request URL for debugging purposes
-  console.log('Request URL:', req.url);
+  console.log('Request URL:', req.url);  // Debugging log
 
   if (req.method === 'GET') {
     // Collect browser information and process the response for GET requests
@@ -89,7 +87,7 @@ app.all('*', (req, res) => {
 // Helper function to check if any key starts with a specific needle
 function anyKeyStartsWith(haystack, needle) {
   for (const [k, v] of Object.entries(haystack)) {
-    if (k.indexOf(needle) === 0) {  // Replaced regex with indexOf
+    if (k.indexOf(needle) === 0) {  // Replace regex with indexOf
       return true;
     }
   }

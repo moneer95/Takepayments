@@ -12,6 +12,13 @@ const { Gateway } = require('./gateway.js');
 
 const app = express();
 
+// right after `const app = express();`
+app.use((req, res, next) => {
+  console.log(`➡️  [${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
+  next();
+});
+
+
 // ─── 1) Middlewares ────────────────────────────────────────────────────────────
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());

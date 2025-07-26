@@ -33,7 +33,7 @@ const gateway = require('./gateway.js').Gateway;
 Once your SDK has been required. You create your request array, for example:
 ```
 reqFields = {
-      "merchantID" => "100856",
+      "merchantID" => "278346",
       "action" => "SALE",
       "type" => 1,
       "transactionUnique" => uniqid,

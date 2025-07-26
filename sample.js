@@ -171,7 +171,7 @@ function getInitialFields(req, pageURL, remoteAddress) {
         .reduce((sum, item) => sum + item.price * item.quantity, 0) * 100;
 
     return {
-        merchantID: '100856',
+        merchantID: '278346',
         action: 'SALE',
         type: 1,
         transactionUnique: uuid(),

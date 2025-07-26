@@ -1,22 +1,21 @@
-const express = require('express');  // Import Express
-const http = require('http'); // Import Node.js core module
-const qs = require('querystring');
-const crypto = require('crypto');
-const httpBuildQuery = require('http-build-query');
-const url = require('url');
-const session = require('express-session');
-const htmlUtils = require('./htmlutils.js');
-const gateway = require('./gateway.js').Gateway;
-const assert = require('assert');
-const cors = require('cors');
-const uuid = require('uuid').v4;  // For generating unique session IDs
+const express = require('express'); // Import Express
+const qs = require('querystring'); // Import Node.js querystring module
+const crypto = require('crypto'); // Import Node.js core crypto module
+const httpBuildQuery = require('http-build-query'); // Import http-build-query module
+const url = require('url'); // Import Node.js URL module
+const htmlUtils = require('./htmlutils.js'); // Import your HTML utilities
+const gateway = require('./gateway.js').Gateway; // Import your payment gateway
+const assert = require('assert'); // Import assertion module
+const uuid = require('uuid').v4; // For generating unique session IDs
+const cors = require('cors'); // CORS support
+const session = require('express-session'); // Session management for Express
 
 // Initialize Express app
-const app = express();  // This was missing in your code
+const app = express();
 
 // Enable CORS and session management
 app.use(cors({
-  origin: 'https://test.ea-dental.com', // Allow any origin
+  origin: 'https://test.ea-dental.com',
   credentials: true,
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -31,41 +30,55 @@ app.use(session({
   cookie: { secure: false, sameSite: 'none' }
 }));
 
-// Endpoint for handling POST requests to `/init`
+// Endpoint for handling POST requests to /init
 app.post('/init', function(req, res) {
-    let body = req.body;  // The POST data sent by the frontend
+    let body = req.body; // The POST data sent by the frontend
 
-    // Store the payload data in session
-    req.session.payload = body;
+    // Check for browser info before initiating the gateway request
+    if (anyKeyStartsWith(body, 'browserInfo[')) {
+        let fields = getInitialFields(req.session.payload, 'https://d44cf4d997d1.ngrok-free.app/', req.connection.remoteAddress);
 
-    // Example: Storing some data from the payload in the session
-    req.session.cart = body.cart || [];
-    req.session.card = {
-        number: body.cardNumber,
-        expiryMonth: body.cardExpiryMonth,
-        expiryYear: body.cardExpiryYear,
-        cvv: body.cardCVV
-    };
-    req.session.customer = {
-        name: body.customerName,
-        email: body.customerEmail,
-        address: body.customerAddress,
-        postCode: body.customerPostCode
-    };
+        // Merge incoming browser info into the fields
+        for ([k, v] of Object.entries(body)) {
+            fields[k.substr(12, k.length - 13)] = v; // Strip 'browserInfo[' and ']' from keys
+        }
 
-    console.log("Session data saved: ", req.session);
+        gateway.directRequest(fields).then((response) => {
+            body = processResponseFields(response, gateway);
+            sendResponse(body, res);
+        }).catch((error) => {
+            console.error(error);
+        });
 
-    // Proceed with your payment logic (browser info, gateway request, etc.)
-    const fields = getInitialFields(req.session.payload, 'https://d44cf4d997d1.ngrok-free.app/', req.connection.remoteAddress);
+    } else if (anyKeyStartsWith(body, 'threeDSResponse[')) {
+        // Process 3DS response after challenge
+        let reqFields = {
+            action: 'SALE',
+            merchantID: getInitialFields(null, null).merchantID,
+            threeDSRef: global.threeDSRef,
+            threeDSResponse: '',
+        };
 
-    gateway.directRequest(fields).then((response) => {
-        body = processResponseFields(response, gateway);
-        sendResponse(body, res);
-    }).catch((error) => {
-        console.error(error);
-        res.statusCode = 500;
-        res.end("Gateway error");
-    });
+        // Build the response string
+        for ([k, v] of Object.entries(body)) {
+            reqFields.threeDSResponse += '[' + k + ']' + '__EQUAL__SIGN__' + v + '&';
+        }
+        
+        // Remove the last & for good measure
+        reqFields.threeDSResponse = reqFields.threeDSResponse.substr(0, reqFields.threeDSResponse.length - 1);
+
+        gateway.directRequest(reqFields).then((response) => {
+            body = processResponseFields(response, gateway);
+            sendResponse(body, res);
+        }).catch((error) => {
+            console.error(error);
+        });
+
+    } else {
+        // If the incoming request is not browser info or 3DS response, handle it normally
+        console.log('Unexpected POST data:', body);
+        res.status(400).send('Invalid data');
+    }
 });
 
 // Helper function to check for matching keys

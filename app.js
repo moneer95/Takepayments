@@ -1,191 +1,165 @@
-// app.js
-const express      = require('express');
-const session      = require('express-session');
-const bodyParser   = require('body-parser');
-const http         = require('http');
-const { v4: uuid } = require('uuid');
-
+const http = require('http'); // Import Node.js core module
+const qs = require('querystring');
+const crypto = require('crypto');
+const httpBuildQuery = require('http-build-query');
+const url = require('url');
 const htmlUtils = require('./htmlutils.js');
-const { Gateway } = require('./gateway.js');
-
-const app = express();
-
-// at the very top of app.js, before any routes:
+const gateway = require('./gateway.js').Gateway;
+const assert = require('assert');
 const cors = require('cors');
 
+// Allow all origins (disabling CORS restrictions)
 app.use(cors({
-  origin: 'https://test.ea-dental.com',
+  origin: '*', // Allow any origin
   credentials: true,
-  methods: ['GET','POST','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization']
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 
-// ─── 1) Body parsing & sessions ───────────────────────────────────────────────
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: false }));
-app.use(session({
-  genid: () => uuid(),
-  secret: process.env.SESSION_SECRET || 'change_me',
-  resave: false,
-  saveUninitialized: false,
-  cookie: { secure: false, sameSite: 'none' }
-}));
+var server = http.createServer(function(req, res) { // Create web server
+    let body = '';
+    global.times = 0;
 
-// ─── 2) POST /init — stash cart & card, render browser‑info form ─────────────
-app.post('/init', (req, res) => {
-  console.log('🟢 [INIT] /init body:', req.body);
-  const {
-    cart,
-    cardNumber, cardExpiryMonth, cardExpiryYear, cardCVV,
-    customerName, customerEmail, customerAddress, customerPostCode
-  } = req.body;
+    if (req.method !== 'POST') {
+        // For GET request, send browser info form
+        body = htmlUtils.collectBrowserInfo(req);
+        sendResponse(body, res);
+    } else {
+        req.on('data', function(data) {
+            body += data;
 
-  // 2.1 stash cart
-  try {
-    req.session.cart = typeof cart === 'string' ? JSON.parse(cart) : cart;
-  } catch (e) {
-    console.warn('⚠️ [INIT] bad cart JSON', e);
-    req.session.cart = [];
-  }
-  console.log('🟢 [INIT] session.cart =', req.session.cart);
+            // Too much POST data,
+            if (body.length > 1e6)
+                request.connection.destroy();
+        });
 
-  // 2.2 stash card + customer
-  req.session.card = {
-    number:      cardNumber,
-    expiryMonth: +cardExpiryMonth,
-    expiryYear:  +cardExpiryYear,
-    cvv:         cardCVV
-  };
-  req.session.customer = {
-    name:     customerName,
-    email:    customerEmail,
-    address:  customerAddress,
-    postCode: customerPostCode
-  };
-  console.log('🟢 [INIT] session.card =', req.session.card);
-  console.log('🟢 [INIT] session.customer =', req.session.customer);
+        req.on('end', function() {
+            let post;
+            try {
+                post = JSON.parse(body);  // Parse the incoming JSON payload
+            } catch (e) {
+                console.error("Error parsing JSON", e);
+                res.statusCode = 400;
+                res.end("Invalid JSON payload");
+                return;
+            }
 
-  // 2.3 render the hidden browser‑info form
-  const formHtml = htmlUtils.getWrapHTML(htmlUtils.collectBrowserInfo(req));
-  console.log('🟢 [INIT] formHtml:', formHtml); // Log the HTML form content
-  res.send(formHtml);
+            // Collect browser information step - to present to the gateway
+            if (anyKeyStartsWith(post, 'browserInfo[')) {
+                let fields = getInitialFields(post, 'https://takepayments.ea-dental.com/', '127.0.0.1');
+                for ([k, v] of Object.entries(post)) {
+                    fields[k.substr(12, k.length - 13)] = v;
+                }
+
+                gateway.directRequest(fields).then((response) => {
+                    body = processResponseFields(response, gateway);
+                    sendResponse(body, res);
+                }).catch((error) => {
+                    console.error(error);
+                    res.statusCode = 500;
+                    res.end("Gateway error");
+                });
+            } 
+            // Check if it's the 3DS challenge response submission
+            else if (anyKeyStartsWith(post, 'threeDSResponse[')) {
+                let reqFields = {
+                    action: 'SALE',
+                    merchantID: getInitialFields(post, null, null).merchantID,
+                    threeDSRef: global.threeDSRef,
+                    threeDSResponse: '',
+                };
+
+                for ([k, v] of Object.entries(post)) {
+                    reqFields.threeDSResponse += '[' + k + ']' + '__EQUAL__SIGN__' + v + '&';
+                }
+                reqFields.threeDSResponse = reqFields.threeDSResponse.substr(0, reqFields.threeDSResponse.length - 1);
+                gateway.directRequest(reqFields).then((response) => {
+                    body = processResponseFields(response, gateway);
+                    sendResponse(body, res);
+                }).catch((error) => {
+                    console.error(error);
+                    res.statusCode = 500;
+                    res.end("Gateway error");
+                });
+            }
+        });
+    }
 });
 
-// ─── 3) GET / — also render browser‑info if someone hits the root directly ─────
-app.get('/', (req, res) => {
-  console.log('🟡 [GET /] URL:', req.originalUrl);
-  // (Optional) allow passing cart/card via querystring here if you still want
-  const formHtml = htmlUtils.getWrapHTML(htmlUtils.collectBrowserInfo(req));
-  res.send(formHtml);
-});
+// Helper function to check for matching keys
+function anyKeyStartsWith(haystack, needle) {
+    for ([k, v] of Object.entries(haystack)) {
+        if (k.startsWith(needle)) {
+            return true;
+        }
+    }
+    return false;
+}
 
-// ─── 4) POST / — your two‑step 3DS flow ───────────────────────────────────────
-app.post('/', (req, res) => {
-  console.log('🔵 [POST /] body=', req.body);
-  const post = req.body;
+// Process response from gateway
+function processResponseFields(responseFields, gateway) {
+    switch (responseFields["responseCode"]) {
+        case "65802":
+            global.threeDSRef = responseFields["threeDSRef"];
+            return htmlUtils.showFrameForThreeDS(responseFields);
+        case "0":
+            return "<p>Thank you for your payment.</p>";
+        default:
+            return "<p>Failed to take payment: message=" + responseFields["responseMessage"] + " code=" + responseFields["responseCode"] + "</p>";
+    }
+}
 
-  // Step 1: browser‑info submission
-  if (anyKeyStartsWith(post, 'browserInfo[')) {
-    console.log('🔵 [3DS] step 1 detected');
-    const fields = getInitialFields(req, 'https://takepayments.ea-dental.com/', req.ip);
-    Object.entries(post).forEach(([k, v]) => {
-      fields[k.slice(12, -1)] = v;
-    });
-    console.log('🔵 [3DS] fields1=', fields);
-    return Gateway.directRequest(fields)
-      .then(r => {
-        console.log('🔵 [3DS] resp1=', r);
-        const html = htmlUtils.getWrapHTML(processResponseFields(r, req));
-        res.send(html);
-      })
-      .catch(err => {
-        console.error('🔴 [3DS] err1=', err);
-        res.status(500).send('Gateway error');
-      });
-  }
+// Send response back to the client
+function sendResponse(body, res) {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.write(htmlUtils.getWrapHTML(body));
+    res.end();
+}
 
-  // Step 2: challenge response
-  if (!anyKeyStartsWith(post, 'threeDSResponse[')) {
-    console.log('🔵 [3DS] step 2 challenge');
-    const reqFields = {
-      action:          'SALE',
-      merchantID:      getInitialFields(req).merchantID,
-      threeDSRef:      req.session.threeDSRef,
-      threeDSRexsponse: Object.entries(post)
-        .map(([k, v]) => `[${k}]__EQUAL__SIGN__${v}`)
-        .join('&')
+server.listen(8012);
+
+// This provides placeholder data for demonstration purposes only.
+function getInitialFields(payload, pageURL, remoteAddress) {
+    // Generate a unique transaction ID
+    let uniqid = Math.random().toString(36).substr(2, 10);
+
+    // Extract details from the payload
+    const {
+        cart,
+        cardNumber,
+        cardExpiryMonth,
+        cardExpiryYear,
+        cardCVV,
+        customerName,
+        customerEmail,
+        customerAddress,
+        customerPostCode,
+    } = payload;
+
+    // Calculate the total amount from the cart
+    const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0) * 100;
+
+    return {
+        "merchantID": "278346",  // Replace with your actual merchant ID
+        "action": "SALE",
+        "type": 1,
+        "transactionUnique": uniqid,
+        "countryCode": 826,
+        "currencyCode": 826,
+        "amount": total || 1, // Amount in cents (e.g., $1.00 becomes 100)
+        "cardNumber": cardNumber,
+        "cardExpiryMonth": cardExpiryMonth,
+        "cardExpiryYear": cardExpiryYear,
+        "cardCVV": cardCVV,
+        "customerName": customerName,
+        "customerEmail": customerEmail,
+        "customerAddress": customerAddress,
+        "customerPostCode": customerPostCode,
+        "orderRef": "Test purchase", // You can modify this as needed
+        "remoteAddress": remoteAddress,
+        "merchantCategoryCode": 5411, // This is the MCC code for retail
+        "threeDSVersion": "2", // Specify the version of 3D Secure
+        "threeDSRedirectURL": pageURL + "&acs=1", // Redirect URL after authentication
     };
-    console.log('🔵 [3DS] fields2=', reqFields);
-    return Gateway.directRequest(reqFields)
-      .then(r => {
-        console.log('🔵 [3DS] resp2=', r);
-        const html = htmlUtils.getWrapHTML(processResponseFields(r, req));
-        res.send(html);
-      })
-      .catch(err => {
-        console.error('🔴 [3DS] err2=', err);
-        res.status(500).send('Gateway error');
-      });
-  }
-
-  // neither step matched
-  res.status(404).send('Not Found');
-});
-
-// ─── 5) Helpers ────────────────────────────────────────────────────────────────
-function anyKeyStartsWith(obj, needle) {
-  return Object.keys(obj).some(k => k.startsWith(needle));
 }
-
-function processResponseFields(fields, req) {
-  console.log('🟢 [processResponseFields] code=', fields.responseCode);
-  switch (fields.responseCode) {
-    case '65802':
-      console.log('🟢 [3DS] storing threeDSRef=', fields.threeDSRef);
-      req.session.threeDSRef = fields.threeDSRef;
-      return htmlUtils.showFrameForThreeDS(fields);
-    case '0':
-      return '<p>Thank you for your payment.</p>';
-    default:
-      return `<p>Failed: ${fields.responseMessage} (${fields.responseCode})</p>`;
-  }
-}
-
-function getInitialFields(req, pageURL, remoteAddr) {
-  const cart = req.session.cart || [];
-  const card = req.session.card || {};
-  const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0) * 100;
-
-  const f = {
-    merchantID:         '278346',
-    action:             'SALE',
-    type:               1,
-    transactionUnique:  uuid(),
-    countryCode:        826,
-    currencyCode:       826,
-    amount:             total || 1,
-    cardNumber:         card.number,
-    cardExpiryMonth:    card.expiryMonth,
-    cardExpiryYear:     card.expiryYear,
-    cardCVV:            card.cvv,
-    customerName:       req.session.customer?.name ,
-    customerEmail:      req.session.customer?.email,
-    customerAddress:    req.session.customer?.address ,
-    customerPostCode:   req.session.customer?.postCode,
-    orderRef:           'Test purchase',
-    remoteAddress:      remoteAddr,
-    merchantCategoryCode: 5411,
-    threeDSVersion:     '2',
-    threeDSRedirectURL: (pageURL||'') + '&acs=1'
-  };
-  console.log('🟢 [getInitialFields]=', f);
-  return f;
-}
-
-
-
-// ─── 6) Launch server ─────────────────────────────────────────────────────────
-http.createServer(app).listen(8012, () => {
-  console.log('🚀 Takepayments listening on port 8012');
-});

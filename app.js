@@ -27,14 +27,17 @@ let globalTimes = 0;
 
 // Route for handling all requests
 app.all('*', (req, res) => {
-  const getParams = url.parse(req.url, true).query;
+  const getParams = new URL(req.url, `http://${req.headers.host}`).searchParams;
   let body = '';
 
-  if (req.method !== 'POST') {
-    // Collect browser information and process the response
+  // Log the request URL for debugging purposes
+  console.log('Request URL:', req.url);
+
+  if (req.method === 'GET') {
+    // Collect browser information and process the response for GET requests
     body = htmlUtils.collectBrowserInfo(req);
     sendResponse(body, res);
-  } else {
+  } else if (req.method === 'POST') {
     req.on('data', (data) => {
       body += data;
 
@@ -49,7 +52,7 @@ app.all('*', (req, res) => {
       if (anyKeyStartsWith(post, 'browserInfo[')) {
         let fields = getInitialFields('https://takepayments.ea-dental.com/', '127.0.0.1');
         for (const [k, v] of Object.entries(post)) {
-          fields[k.substr(12, k.length - 13)] = v;
+          fields[k.substring(12, k.length - 13)] = v;
         }
 
         gateway.directRequest(fields).then((response) => {
@@ -86,7 +89,7 @@ app.all('*', (req, res) => {
 // Helper function to check if any key starts with a specific needle
 function anyKeyStartsWith(haystack, needle) {
   for (const [k, v] of Object.entries(haystack)) {
-    if (k.startsWith(needle)) {
+    if (k.indexOf(needle) === 0) {  // Replaced regex with indexOf
       return true;
     }
   }

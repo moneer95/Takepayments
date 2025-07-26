@@ -88,7 +88,7 @@ app.post('/', (req, res) => {
   // Step 1: browser‑info submission
   if (anyKeyStartsWith(post, 'browserInfo[')) {
     console.log('🔵 [3DS] step 1 detected');
-    const fields = getInitialFields(req, 'https://takepayments.ea-dental.com', req.ip);
+    const fields = getInitialFields(req, 'https://takepayments.ea-dental.com/', req.ip);
     Object.entries(post).forEach(([k, v]) => {
       fields[k.slice(12, -1)] = v;
     });

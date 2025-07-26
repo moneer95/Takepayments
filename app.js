@@ -177,7 +177,7 @@ function getInitialFields(req, pageURL, remoteAddr) {
     remoteAddress:      remoteAddr,
     merchantCategoryCode: 5411,
     threeDSVersion:     '2',
-    threeDSRedirectURL: (pageURL||'') + '&acs=1'
+    "threeDSRedirectURL": pageURL + (pageURL.includes('?') ? '&' : '?') + 'acs=1'
   };
   console.log('🟢 [getInitialFields]=', f);
   return f;

@@ -77,7 +77,7 @@ app.post('/init', (req, res) => {
 });
 
 // ─── 3) Browser-info GET handler for any other non-POST ───────────────────────
-app.all('*', (req, res, next) => {
+app.all('(.*)', (req, res, next) => {
   if (req.method !== 'POST') {
     console.log(`🟡 [ALL/*] ${req.method} ${req.url} — rendering browser-info`);
     const params = url.parse(req.url, true).query;

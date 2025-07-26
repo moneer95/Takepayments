@@ -12,17 +12,6 @@ const { Gateway } = require('./gateway.js');
 
 const app = express();
 
-// right after `const app = express();`
-app.use((req, res, next) => {
-  console.log(`➡️  [${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
-  next();
-});
-
-
-// ─── 1) Middlewares ────────────────────────────────────────────────────────────
-app.use(bodyParser.urlencoded({ extended: false }));
-app.use(bodyParser.json());
-
 const corsOptions = {
   origin:        'https://test.ea-dental.com',  // your Next.js origin
   credentials:   true,                          // allow cookies
@@ -35,6 +24,18 @@ app.use(cors(corsOptions));
 
 // explicitly handle preflight across the board
 app.options('*', cors(corsOptions));
+
+// right after `const app = express();`
+app.use((req, res, next) => {
+  console.log(`➡️  [${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
+  next();
+});
+
+
+// ─── 1) Middlewares ────────────────────────────────────────────────────────────
+app.use(bodyParser.urlencoded({ extended: false }));
+app.use(bodyParser.json());
+
 
 app.use(session({
   genid: () => uuid(),

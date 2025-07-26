@@ -148,14 +148,14 @@ function getInitialFields(payload, pageURL, remoteAddress) {
         "countryCode": 826,
         "currencyCode": 826,
         "amount": total || 1, // Amount in cents (e.g., $1.00 becomes 100)
-        "cardNumber": cardNumber,
-        "cardExpiryMonth": cardExpiryMonth,
-        "cardExpiryYear": cardExpiryYear,
-        "cardCVV": cardCVV,
-        "customerName": customerName,
-        "customerEmail": customerEmail,
-        "customerAddress": customerAddress,
-        "customerPostCode": customerPostCode,
+        "cardNumber": '4058888012110947',
+        "cardExpiryMonth": 1,
+        "cardExpiryYear": 30,
+        "cardCVV": 726,
+        "customerName": 'monir',
+        "customerEmail": 'mnyrskyk@gmail.com',
+        "customerAddress": 'customerAddress',
+        "customerPostCode": '0000000',
         "orderRef": "Test purchase", // You can modify this as needed
         "remoteAddress": remoteAddress,
         "merchantCategoryCode": 5411, // This is the MCC code for retail

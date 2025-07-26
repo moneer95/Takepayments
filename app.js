@@ -6,7 +6,18 @@ const htmlUtils = require('./htmlutils.js');
 const gateway = require('./gateway.js').Gateway;
 const cors = require('cors');
 
+// PM2-compatible logging setup
+const debug = 'VERBOSE_DEBUG' ? console.log : () => {};
+const verboseDebug = 'VERBOSE_DEBUG' ? console.log : () => {};
+
 const app = express();
+
+// Add request ID for tracking
+app.use((req, res, next) => {
+  req.requestId = crypto.randomBytes(4).toString('hex');
+  debug(`[${req.requestId}] ${req.method} ${req.url}`);
+  next();
+});
 
 // Enable CORS
 app.use(cors({
@@ -23,39 +34,140 @@ app.use(express.urlencoded({ extended: true }));
 // Global variable for 3DS reference
 let threeDSRef = null;
 
-// Helper function to check if any key starts with a prefix
+// Helper functions with PM2 logging
 function anyKeyStartsWith(haystack, needle) {
-  return Object.keys(haystack).some(k => k.startsWith(needle));
+  const result = Object.keys(haystack).some(k => k.startsWith(needle));
+  verboseDebug(`[${this.req?.requestId || 'SYSTEM'}] anyKeyStartsWith result:`, result);
+  return result;
 }
 
-// Helper function to process the gateway's response fields
-function processResponseFields(responseFields) {
+function processResponseFields(responseFields, req) {
+  debug(`[${req.requestId}] Processing response code: ${responseFields["responseCode"]}`);
+  
   switch (responseFields["responseCode"]) {
     case "65802":
       threeDSRef = responseFields["threeDSRef"];
+      debug(`[${req.requestId}] 3DS Auth Required. Ref: ${threeDSRef}`);
       return htmlUtils.showFrameForThreeDS(responseFields);
     case "0":
+      debug(`[${req.requestId}] Payment Successful`);
       return "<p>Thank you for your payment.</p>";
     default:
+      debug(`[${req.requestId}] Payment Failed. Code: ${responseFields["responseCode"]}`);
       return `<p>Payment failed: ${responseFields["responseMessage"]} (code ${responseFields["responseCode"]})</p>`;
   }
 }
 
-// Helper function to send response
-function sendResponse(body, res) {
+// Routes
+app.get('/', (req, res) => {
+  try {
+    const body = htmlUtils.collectBrowserInfo(req);
+    verboseDebug(`[${req.requestId}] Browser info:`, body);
+    sendResponse(body, res, req);
+  } catch (err) {
+    console.error(`[${req.requestId}] GET Error:`, err);
+    res.status(500).send('Internal Server Error');
+  }
+});
+
+app.post('/', (req, res) => {
+  let body = '';
+  
+  req.on('data', (data) => {
+    body += data;
+    if (body.length > 1e6) {
+      debug(`[${req.requestId}] Request too large`);
+      req.connection.destroy();
+    }
+  });
+
+  req.on('end', () => {
+    try {
+      const post = qs.parse(body);
+      verboseDebug(`[${req.requestId}] POST data:`, post);
+
+      if (anyKeyStartsWith.call({req}, post, 'browserInfo[')) {
+        handleBrowserInfo(post, req, res);
+      } else if (!anyKeyStartsWith.call({req}, post, 'threeDSResponse[')) {
+        handleThreeDSResponse(post, req, res);
+      } else {
+        res.status(400).send('Invalid request');
+      }
+    } catch (error) {
+      console.error(`[${req.requestId}] POST Error:`, error);
+      res.status(500).send('Internal Server Error');
+    }
+  });
+});
+
+// Handler functions
+function handleBrowserInfo(post, req, res) {
+  try {
+    let fields = getInitialFields('https://takepayments.ea-dental.com/', req.ip);
+    verboseDebug(`[${req.requestId}] Initial fields:`, fields);
+    
+    Object.entries(post).forEach(([k, v]) => {
+      if (k.startsWith('browserInfo[') && k.endsWith(']')) {
+        const key = k.substring(12, k.length - 1);
+        fields[key] = v;
+      }
+    });
+
+    debug(`[${req.requestId}] Sending to gateway`);
+    gateway.directRequest(fields)
+      .then(response => {
+        verboseDebug(`[${req.requestId}] Gateway response:`, response);
+        sendResponse(processResponseFields(response, req), res, req);
+      })
+      .catch(error => {
+        console.error(`[${req.requestId}] Gateway error:`, error);
+        res.status(502).send('Bad Gateway');
+      });
+  } catch (err) {
+    console.error(`[${req.requestId}] BrowserInfo Error:`, err);
+    res.status(500).send('Internal Server Error');
+  }
+}
+
+function handleThreeDSResponse(post, req, res) {
+  try {
+    let reqFields = {
+      action: 'SALE',
+      merchantID: getInitialFields().merchantID,
+      threeDSRef: threeDSRef,
+      threeDSResponse: Object.entries(post)
+        .map(([k, v]) => `[${k}]__EQUAL__SIGN__${v}`)
+        .join('&')
+    };
+
+    debug(`[${req.requestId}] Sending 3DS verification`);
+    gateway.directRequest(reqFields)
+      .then(response => {
+        verboseDebug(`[${req.requestId}] 3DS response:`, response);
+        sendResponse(processResponseFields(response, req), res, req);
+      })
+      .catch(error => {
+        console.error(`[${req.requestId}] 3DS Error:`, error);
+        res.status(502).send('3DS Processing Failed');
+      });
+  } catch (err) {
+    console.error(`[${req.requestId}] 3DS Handler Error:`, err);
+    res.status(500).send('Internal Server Error');
+  }
+}
+
+// Utility functions
+function sendResponse(body, res, req) {
+  verboseDebug(`[${req.requestId}] Sending response`);
   res.status(200).send(htmlUtils.getWrapHTML(body));
 }
 
-// Function to get initial fields for the request
 function getInitialFields(pageURL, remoteAddress) {
-  const uniqid = Math.random().toString(36).substring(2, 12);
-  const correctUrl = pageURL ? `${pageURL}?acs=1` : `https://takepayments.ea-dental.com/?acs=1`;
-
-  return {
+  const fields = {
     merchantID: "278346",
     action: "SALE",
     type: 1,
-    transactionUnique: uniqid,
+    transactionUnique: crypto.randomBytes(8).toString('hex'),
     countryCode: 826,
     currencyCode: 826,
     amount: 1,
@@ -71,89 +183,31 @@ function getInitialFields(pageURL, remoteAddress) {
     remoteAddress: remoteAddress || "127.0.0.1",
     merchantCategoryCode: 5411,
     threeDSVersion: "2",
-    threeDSRedirectURL: correctUrl,
-  };
-}
-
-// Route for GET requests
-app.get('/', (req, res) => {
-  const body = htmlUtils.collectBrowserInfo(req);
-  sendResponse(body, res);
-});
-
-// Route for POST requests
-app.post('/', (req, res) => {
-  let body = '';
-  
-  req.on('data', (data) => {
-    body += data;
-    if (body.length > 1e6) req.connection.destroy();
-  });
-
-  req.on('end', () => {
-    try {
-      const post = qs.parse(body);
-
-      if (anyKeyStartsWith(post, 'browserInfo[')) {
-        handleBrowserInfo(post, res);
-      } else if (!anyKeyStartsWith(post, 'threeDSResponse[')) {
-        handleThreeDSResponse(post, res);
-      } else {
-        res.status(400).send('Invalid request');
-      }
-    } catch (error) {
-      console.error('Error processing request:', error);
-      res.status(500).send('Internal Server Error');
-    }
-  });
-});
-
-// Handle browser info requests
-function handleBrowserInfo(post, res) {
-  let fields = getInitialFields('https://takepayments.ea-dental.com/', req.ip);
-  
-  Object.entries(post).forEach(([k, v]) => {
-    if (k.startsWith('browserInfo[') && k.endsWith(']')) {
-      const key = k.substring(12, k.length - 1);
-      fields[key] = v;
-    }
-  });
-
-  gateway.directRequest(fields)
-    .then(response => sendResponse(processResponseFields(response), res))
-    .catch(error => {
-      console.error('Gateway error:', error);
-      res.status(502).send('Bad Gateway');
-    });
-}
-
-// Handle 3DS responses
-function handleThreeDSResponse(post, res) {
-  let reqFields = {
-    action: 'SALE',
-    merchantID: getInitialFields().merchantID,
-    threeDSRef: threeDSRef,
-    threeDSResponse: Object.entries(post)
-      .map(([k, v]) => `[${k}]__EQUAL__SIGN__${v}`)
-      .join('&')
+    threeDSRedirectURL: pageURL ? `${pageURL}?acs=1` : `https://takepayments.ea-dental.com/?acs=1`,
   };
 
-  gateway.directRequest(reqFields)
-    .then(response => sendResponse(processResponseFields(response), res))
-    .catch(error => {
-      console.error('3DS processing error:', error);
-      res.status(502).send('3DS Processing Failed');
-    });
+  verboseDebug('Generated fields:', fields);
+  return fields;
 }
 
-// Error handling middleware
+// Error handling
 app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
+  console.error(`[${req.requestId}] Unhandled Error:`, err);
   res.status(500).send('Internal Server Error');
 });
 
-// Start the server
+// Start server
 const PORT = 8012;
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`
+  Server running on port ${PORT}
+  
+  PM2 Debugging Options:
+  1. Normal mode: pm2 start app.js
+  2. Debug mode: pm2 start app.js --env DEBUG
+  3. Verbose mode: pm2 start app.js --env VERBOSE_DEBUG
+  
+  Logs can be viewed with:
+  pm2 logs app --lines 1000
+  `);
 });

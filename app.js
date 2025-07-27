@@ -9,6 +9,14 @@ const gateway = require('./gateway.js').Gateway;
 const app = express();
 const PORT = 8012;
 
+// Enable CORS and session management
+app.use(cors({
+  origin: 'https://test.ea-dental.com', // Allow any origin
+  credentials: true,
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+
 // Configure session middleware
 app.use(session({
   secret: 'your-secret-key', // Change this to a strong secret

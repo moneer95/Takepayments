@@ -5,30 +5,21 @@ const session = require('express-session');
 const url = require('url');
 const htmlUtils = require('./htmlutils.js');
 const gateway = require('./gateway.js').Gateway;
-const cors = require('cors');
-
 
 const app = express();
 const PORT = 8012;
 
-// Enable CORS and session management
-app.use(cors({
-  origin: 'https://test.ea-dental.com', // Allow any origin
-  credentials: true,
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-}));
-
 // Configure session middleware
 app.use(session({
-  secret: 'your-secret-key', // Change this to a strong secret
+  secret: 'your-strong-secret-key-here', // Change this to a strong secret
   resave: false,
   saveUninitialized: true,
-  cookie: { secure: false, httpOnly: true } // Set secure:true in production with HTTPS
+  cookie: { 
+    secure: false, // Set to true in production with HTTPS
+    httpOnly: true,
+    maxAge: 15 * 60 * 1000 // 15 minutes
+  } 
 }));
-
-// Global variable for 3DS reference
-let threeDSRef = null;
 
 // Helper function to check if any key starts with a prefix
 function anyKeyStartsWith(haystack, needle) {
@@ -40,14 +31,15 @@ function anyKeyStartsWith(haystack, needle) {
   return false;
 }
 
-// Process gateway responses
-function processResponseFields(responseFields) {
+// Process gateway responses - now uses session for threeDSRef
+function processResponseFields(req, responseFields) {
   switch (responseFields["responseCode"]) {
     case "65802":
-      threeDSRef = responseFields["threeDSRef"];
+      // Store 3DS reference in session
+      req.session.threeDSRef = responseFields["threeDSRef"];
       return htmlUtils.showFrameForThreeDS(responseFields);
     case "0":
-      return "<p>Thank you for your payment.</p>";
+      return "<p>.</p>";
     default:
       return `<p>Failed to take payment: message=${responseFields["responseMessage"]} code=${responseFields["responseCode"]}</p>`;
   }
@@ -61,16 +53,16 @@ function sendResponse(res, body) {
 }
 
 // Get initial fields using session data
-function getInitialFieldsFromSession(session, pageURL, remoteAddress) {
+function getInitialFieldsFromSession(req, pageURL, remoteAddress) {
   let uniqid = Math.random().toString(36).substr(2, 10);
   
-  // Correctly format the URL with `?` if there are no parameters yet or `&` if parameters already exist
+  // Correctly format the URL
   const correctUrl = pageURL ? `${pageURL}${pageURL.includes('?') ? '&' : '?'}acs=1` : `https://takepayments.ea-dental.com/?acs=1`;
 
   // Calculate total amount from cart items
   let totalAmount = 0;
-  if (session.paymentDetails?.cart) {
-    session.paymentDetails.cart.forEach(item => {
+  if (req.session.paymentDetails?.cart) {
+    req.session.paymentDetails.cart.forEach(item => {
       totalAmount += item.price * item.quantity;
     });
   }
@@ -82,15 +74,15 @@ function getInitialFieldsFromSession(session, pageURL, remoteAddress) {
     "transactionUnique": uniqid,
     "countryCode": 826,
     "currencyCode": 826,
-    "amount": totalAmount * 100, // Use calculated amount or default
-    "cardNumber": session.paymentDetails?.cardNumber || "3456787654589686",
-    "cardExpiryMonth": session.paymentDetails?.cardExpiryMonth || 1,
-    "cardExpiryYear": session.paymentDetails?.cardExpiryYear || 30,
-    "cardCVV": session.paymentDetails?.cardCVV || "726",
-    "customerName": session.paymentDetails?.customerName || "Test Customer",
-    "customerEmail": session.paymentDetails?.customerEmail || "test@testcustomer.com",
-    "customerAddress": session.paymentDetails?.customerAddress || "16 Test Street",
-    "customerPostCode": session.paymentDetails?.customerPostCode || "TE15 5ST",
+    "amount": totalAmount || 1,
+    "cardNumber": req.session.paymentDetails?.cardNumber || "",
+    "cardExpiryMonth": req.session.paymentDetails?.cardExpiryMonth || 1,
+    "cardExpiryYear": req.session.paymentDetails?.cardExpiryYear || 30,
+    "cardCVV": req.session.paymentDetails?.cardCVV || "",
+    "customerName": req.session.paymentDetails?.customerName || "",
+    "customerEmail": req.session.paymentDetails?.customerEmail || "",
+    "customerAddress": req.session.paymentDetails?.customerAddress || "",
+    "customerPostCode": req.session.paymentDetails?.customerPostCode || "",
     "orderRef": "Online Payment",
     "remoteAddress": remoteAddress,
     "merchantCategoryCode": 5411,
@@ -125,18 +117,26 @@ app.use(express.json());
 // New endpoint for payment initialization
 app.post('/init', (req, res) => {
   try {
+    // Validate required fields
+    if (!req.body.cardNumber || !req.body.cardExpiryMonth || !req.body.cardExpiryYear || !req.body.cardCVV) {
+      return res.status(400).json({ error: 'Missing required card details' });
+    }
+
     // Store payment details in session
     req.session.paymentDetails = {
-      cart: req.body.cart,
+      cart: req.body.cart || [],
       cardNumber: req.body.cardNumber,
       cardExpiryMonth: req.body.cardExpiryMonth,
       cardExpiryYear: req.body.cardExpiryYear,
       cardCVV: req.body.cardCVV,
-      customerName: req.body.customerName,
-      customerEmail: req.body.customerEmail,
-      customerAddress: req.body.customerAddress,
-      customerPostCode: req.body.customerPostCode
+      customerName: req.body.customerName || "",
+      customerEmail: req.body.customerEmail || "",
+      customerAddress: req.body.customerAddress || "",
+      customerPostCode: req.body.customerPostCode || ""
     };
+    
+    // Clear any previous 3DS reference
+    delete req.session.threeDSRef;
     
     // Save session before sending response
     req.session.save(err => {
@@ -168,7 +168,7 @@ app.post('/', (req, res) => {
   // Collect browser information
   if (anyKeyStartsWith(post, 'browserInfo[')) {
     let fields = getInitialFieldsFromSession(
-      req.session, 
+      req, 
       'https://takepayments.ea-dental.com/', 
       req.ip
     );
@@ -178,7 +178,8 @@ app.post('/', (req, res) => {
     }
 
     gateway.directRequest(fields).then((response) => {
-      const body = processResponseFields(response);
+      // Pass req to processResponseFields to access session
+      const body = processResponseFields(req, response);
       sendResponse(res, body);
     }).catch((error) => {
       console.error(error);
@@ -187,10 +188,16 @@ app.post('/', (req, res) => {
   } 
   // Handle 3DS response
   else if (!anyKeyStartsWith(post, 'threeDSResponse[')) {
+    // Validate session has 3DS reference
+    if (!req.session.threeDSRef) {
+      console.error('No 3DS reference found in session');
+      return res.status(400).send('Missing 3DS reference');
+    }
+
     let reqFields = {
       action: 'SALE',
-      merchantID: "278346", // Use merchant ID directly
-      threeDSRef: threeDSRef,
+      merchantID: "278346",
+      threeDSRef: req.session.threeDSRef, // Use from session
       threeDSResponse: '',
     };
 
@@ -201,8 +208,15 @@ app.post('/', (req, res) => {
     reqFields.threeDSResponse = reqFields.threeDSResponse.substr(0, reqFields.threeDSResponse.length - 1);
     
     gateway.directRequest(reqFields).then((response) => {
-      const body = processResponseFields(response);
+      // Pass req to processResponseFields to access session
+      const body = processResponseFields(req, response);
       sendResponse(res, body);
+      
+      // Clear sensitive data after successful payment
+      if (response.responseCode === "0") {
+        delete req.session.paymentDetails;
+        delete req.session.threeDSRef;
+      }
     }).catch((error) => {
       console.error(error);
       res.status(500).send('Internal Server Error');
@@ -222,4 +236,5 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log('Payment init endpoint: POST /init');
+  console.log('Session-based 3DS reference storage enabled');
 });

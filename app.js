@@ -25,11 +25,11 @@ app.use(session({
   secret: 'your-strong-secret-key-here', // Change this to a strong secret
   resave: false,
   saveUninitialized: true,
-  cookie: { 
+  cookie: {
     secure: false, // Set to true in production with HTTPS
     httpOnly: true,
     maxAge: 15 * 60 * 1000 // 15 minutes
-  } 
+  }
 }));
 
 // Helper function to check if any key starts with a prefix
@@ -43,14 +43,38 @@ function anyKeyStartsWith(haystack, needle) {
 }
 
 // Process gateway responses - now uses session for threeDSRef
-function processResponseFields(req, responseFields) {
+async function processResponseFields(req, responseFields) {
   switch (responseFields["responseCode"]) {
     case "65802":
       // Store 3DS reference in session
       req.session.threeDSRef = responseFields["threeDSRef"];
       return htmlUtils.showFrameForThreeDS(responseFields);
     case "0":
-      return "<p>.</p>";
+      // Success — make a POST request
+      try {
+        const res = await fetch("https://test.ea-dental.com/api/payment-succeed", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            transactionId: responseFields["transactionUnique"],
+            amount: responseFields["amount"],
+            currency: responseFields["currencyCode"],
+            message: responseFields["responseMessage"]
+          })
+        });
+
+        if (!res.ok) {
+          throw new Error(`Failed to notify: ${res.statusText}`);
+        }
+
+        return `<p>Payment succeeded. Confirmation sent.</p>`;
+      } catch (err) {
+        return `<p>Payment succeeded, but failed to notify: ${err.message}</p>`;
+      }
+
+      ;
     default:
       return `<p>Failed to take payment: message=${responseFields["responseMessage"]} code=${responseFields["responseCode"]}</p>`;
   }
@@ -66,7 +90,7 @@ function sendResponse(res, body) {
 // Get initial fields using session data
 function getInitialFieldsFromSession(req, pageURL, remoteAddress) {
   let uniqid = Math.random().toString(36).substr(2, 10);
-  
+
   // Correctly format the URL
   const correctUrl = pageURL ? `${pageURL}${pageURL.includes('?') ? '&' : '?'}acs=1` : `https://takepayments.ea-dental.com/?acs=1`;
 
@@ -145,17 +169,17 @@ app.post('/init', (req, res) => {
       customerAddress: req.body.customerAddress || "",
       customerPostCode: req.body.customerPostCode || ""
     };
-    
+
     // Clear any previous 3DS reference
     delete req.session.threeDSRef;
-    
+
     // Save session before sending response
     req.session.save(err => {
       if (err) {
         console.error('Session save error:', err);
         return res.status(500).json({ error: 'Failed to save session' });
       }
-      
+
       // Generate browser info form
       const body = htmlUtils.collectBrowserInfo(req);
       res.set('Content-Type', 'text/html');
@@ -179,11 +203,11 @@ app.post('/', (req, res) => {
   // Collect browser information
   if (anyKeyStartsWith(post, 'browserInfo[')) {
     let fields = getInitialFieldsFromSession(
-      req, 
-      'https://takepayments.ea-dental.com/', 
+      req,
+      'https://takepayments.ea-dental.com/',
       req.ip
     );
-    
+
     for ([k, v] of Object.entries(post)) {
       fields[k.substr(12, k.length - 13)] = v;
     }
@@ -196,7 +220,7 @@ app.post('/', (req, res) => {
       console.error(error);
       res.status(500).send('Internal Server Error');
     });
-  } 
+  }
   // Handle 3DS response
   else if (!anyKeyStartsWith(post, 'threeDSResponse[')) {
     // Validate session has 3DS reference
@@ -215,14 +239,14 @@ app.post('/', (req, res) => {
     for ([k, v] of Object.entries(post)) {
       reqFields.threeDSResponse += '[' + k + ']' + '__EQUAL__SIGN__' + v + '&';
     }
-    
+
     reqFields.threeDSResponse = reqFields.threeDSResponse.substr(0, reqFields.threeDSResponse.length - 1);
-    
+
     gateway.directRequest(reqFields).then((response) => {
       // Pass req to processResponseFields to access session
       const body = processResponseFields(req, response);
       sendResponse(res, body);
-      
+
       // Clear sensitive data after successful payment
       if (response.responseCode === "0") {
         delete req.session.paymentDetails;

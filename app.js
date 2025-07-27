@@ -82,7 +82,7 @@ function getInitialFieldsFromSession(session, pageURL, remoteAddress) {
     "transactionUnique": uniqid,
     "countryCode": 826,
     "currencyCode": 826,
-    "amount": 1, // Use calculated amount or default
+    "amount": totalAmount * 100, // Use calculated amount or default
     "cardNumber": session.paymentDetails?.cardNumber || "3456787654589686",
     "cardExpiryMonth": session.paymentDetails?.cardExpiryMonth || 1,
     "cardExpiryYear": session.paymentDetails?.cardExpiryYear || 30,

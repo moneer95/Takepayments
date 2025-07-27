@@ -109,7 +109,7 @@ function getInitialFieldsFromSession(req, pageURL, remoteAddress) {
     "transactionUnique": uniqid,
     "countryCode": 826,
     "currencyCode": 826,
-    "amount": totalAmount || 1,
+    "amount": 1,
     "cardNumber": req.session.paymentDetails?.cardNumber || "",
     "cardExpiryMonth": req.session.paymentDetails?.cardExpiryMonth || 1,
     "cardExpiryYear": req.session.paymentDetails?.cardExpiryYear || 30,

@@ -5,6 +5,8 @@ const session = require('express-session');
 const url = require('url');
 const htmlUtils = require('./htmlutils.js');
 const gateway = require('./gateway.js').Gateway;
+const cors = require('cors');
+
 
 const app = express();
 const PORT = 8012;

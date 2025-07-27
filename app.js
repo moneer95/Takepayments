@@ -57,12 +57,7 @@ function processResponseFields(req, responseFields) {
           headers: {
             "Content-Type": "application/json"
           },
-          body: JSON.stringify({
-            transactionId: responseFields["transactionUnique"],
-            amount: responseFields["amount"],
-            currency: responseFields["currencyCode"],
-            message: responseFields["responseMessage"]
-          })
+          body: JSON.stringify(req.session.paymentDetails.cart)
         })  
         .then(res => {
           if (!res.ok) throw new Error("Failed to notify server.");

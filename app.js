@@ -43,7 +43,7 @@ function anyKeyStartsWith(haystack, needle) {
 }
 
 // Process gateway responses - now uses session for threeDSRef
-async function processResponseFields(req, responseFields) {
+function processResponseFields(req, responseFields) {
   switch (responseFields["responseCode"]) {
     case "65802":
       // Store 3DS reference in session
@@ -52,7 +52,7 @@ async function processResponseFields(req, responseFields) {
     case "0":
       // Success — make a POST request
       try {
-        const res = await fetch("https://test.ea-dental.com/api/payment-succeed", {
+        const res = fetch("https://test.ea-dental.com/api/payment-succeed", {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
@@ -63,12 +63,16 @@ async function processResponseFields(req, responseFields) {
             currency: responseFields["currencyCode"],
             message: responseFields["responseMessage"]
           })
+        })  
+        .then(res => {
+          if (!res.ok) throw new Error("Failed to notify server.");
+          // Redirect after success
+          window.location.href = "https://test.ea-dental.com/payment-success";
+        })
+        .catch(err => {
+          alert("Payment succeeded, but server notify failed: " + err.message);
         });
-
-        if (!res.ok) {
-          throw new Error(`Failed to notify: ${res.statusText}`);
-        }
-
+      
         return `<p>Payment succeeded. Confirmation sent.</p>`;
       } catch (err) {
         return `<p>Payment succeeded, but failed to notify: ${err.message}</p>`;
@@ -109,7 +113,7 @@ function getInitialFieldsFromSession(req, pageURL, remoteAddress) {
     "transactionUnique": uniqid,
     "countryCode": 826,
     "currencyCode": 826,
-    "amount": 1,
+    "amount": totalAmount || 1,
     "cardNumber": req.session.paymentDetails?.cardNumber || "",
     "cardExpiryMonth": req.session.paymentDetails?.cardExpiryMonth || 1,
     "cardExpiryYear": req.session.paymentDetails?.cardExpiryYear || 30,

@@ -120,7 +120,7 @@ function getInitialFieldsFromSession(req, pageURL, remoteAddress) {
     "customerEmail": req.session.paymentDetails?.customerEmail || "",
     "customerAddress": req.session.paymentDetails?.customerAddress || "",
     "customerPostCode": req.session.paymentDetails?.customerPostCode || "",
-    "redirectURL ": "https://ea-dental.com/success",
+    // "redirectURL ": "https://ea-dental.com/success",
     "orderRef": "Online Payment",
     "remoteAddress": remoteAddress,
     "merchantCategoryCode": 5411,
@@ -253,7 +253,7 @@ app.post('/', (req, res) => {
       // Clear sensitive data after successful payment
       if (response.responseCode === "0") {
         delete req.session.paymentDetails;
-        delete req.session.threeDSRef;
+        // delete req.session.threeDSRef;
       }
     }).catch((error) => {
       console.error(error);

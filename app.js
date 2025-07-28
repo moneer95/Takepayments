@@ -253,7 +253,7 @@ app.post('/', (req, res) => {
       // Clear sensitive data after successful payment
       if (response.responseCode === "0") {
         delete req.session.paymentDetails;
-        // delete req.session.threeDSRef;
+        delete req.session.threeDSRef;
       }
     }).catch((error) => {
       console.error(error);

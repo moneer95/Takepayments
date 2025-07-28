@@ -52,12 +52,15 @@ function processResponseFields(req, responseFields) {
     case "0":
       // Success — make a POST request
       try {
-        const res = fetch("https://test.ea-dental.com/api/payment-succeed", {
+        fetch("https://test.ea-dental.com/api/payment-succeed", {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
           },
-          body: JSON.stringify(req.session.paymentDetails.cart)
+          body: JSON.stringify({
+            cart: req.session.paymentDetails.cart,
+            response: responseFields
+          })
         })  
         .then(res => {
           if (!res.ok) throw new Error("Failed to notify server.");
@@ -249,7 +252,7 @@ app.post('/', (req, res) => {
       // Clear sensitive data after successful payment
       if (response.responseCode === "0") {
         delete req.session.paymentDetails;
-        delete req.session.threeDSRef;
+        // delete req.session.threeDSRef;
       }
     }).catch((error) => {
       console.error(error);

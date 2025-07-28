@@ -22,7 +22,7 @@ app.use(cors({
 
 // Configure session middleware
 app.use(session({
-  secret: 'your-strong-secret-key-here', // Change this to a strong secret
+  secret: 'GACp0xq7o0LXokGC9U9uYKeR3OCXWABfPutwyc55zQ', // Change this to a strong secret
   resave: false,
   saveUninitialized: true,
   cookie: {

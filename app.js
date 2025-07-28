@@ -174,7 +174,7 @@ app.post('/init', (req, res) => {
     };
 
     // Clear any previous 3DS reference
-    delete req.session.threeDSRef;
+    // delete req.session.threeDSRef;
 
     // Save session before sending response
     req.session.save(err => {

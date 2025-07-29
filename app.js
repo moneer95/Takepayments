@@ -23,12 +23,13 @@ app.use(cors({
 // Configure session middleware
 app.use(session({
   secret: 'GACp0xq7o0LXokGC9U9uYKeR3OCXWABfPutwyc55zQ', // Change this to a strong secret
-  resave: false,
-  saveUninitialized: true,
+  resave: true,
+  saveUninitialized: false,
   cookie: {
     secure: false, // Set to true in production with HTTPS
     httpOnly: true,
-    maxAge: 15 * 60 * 1000 // 15 minutes
+    maxAge: 15 * 60 * 1000, // 15 minutes
+    sameSite: 'none'
   }
 }));
 
@@ -48,6 +49,7 @@ function processResponseFields(req, responseFields) {
     case "65802":
       // Store 3DS reference in session
       req.session.threeDSRef = responseFields["threeDSRef"];
+      req.session.save(); // Explicitly save session
       return htmlUtils.showFrameForThreeDS(responseFields);
     case "0":
       // Success — make a POST request
@@ -269,6 +271,14 @@ app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
   res.status(500).send('Internal Server Error');
 });
+
+// Add session debugging middleware
+app.use((req, res, next) => {
+  console.log('Session ID:', req.sessionID);
+  console.log('Session data:', req.session);
+  next();
+});
+
 
 // Start server
 app.listen(PORT, () => {

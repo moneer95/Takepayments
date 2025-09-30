@@ -51,36 +51,51 @@ function processResponseFields(req, responseFields) {
       req.session.threeDSRef = responseFields["threeDSRef"];
       req.session.save(); // Explicitly save session
       return htmlUtils.showFrameForThreeDS(responseFields);
-    case "0":
-      // Success — make a POST request
-      try {
-        fetch("https://test.ea-dental.com/api/payment-succeed", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            cart: req.session.paymentDetails.cart,
-            response: responseFields
-          })
-        })  
-        .then(res => {
-          if (!res.ok) throw new Error("Failed to notify server.");
-          // Redirect after success
-          return res.redirect("https://test.ea-dental.com/success");
-        })
-        .catch(err => {
-          console.error("Payment succeeded, but server notify failed: " + err.message);
-        });
-      } catch (err) {
-        return `<p>Payment succeeded, but failed to notify: ${err.message}</p>`;
+      case "0": {
+        // Fire-and-forget notify; don't block the redirect
+        (async () => {
+          try {
+            const notifyRes = await fetch("https://test.ea-dental.com/api/payment-succeed", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                cart: req.session?.paymentDetails?.cart ?? [],
+                response: responseFields
+              })
+            });
+            if (!notifyRes.ok) {
+              const txt = await notifyRes.text().catch(() => "");
+              throw new Error(`Notify ${notifyRes.status} ${notifyRes.statusText} ${txt}`);
+            }
+          } catch (err) {
+            console.error("Notify failed:", err);
+          }
+        })();
+  
+        // Return HTML that redirects in the browser
+        const successUrl = "https://test.ea-dental.com/success";
+        return `
+          <div style="font-family:system-ui;margin:2rem;">
+            <h2>Payment succeeded</h2>
+            <p>Redirecting to confirmation… If you’re not redirected, <a href="${successUrl}">click here</a>.</p>
+          </div>
+          <script>
+            (function(){ location.replace('${successUrl}'); })();
+          </script>
+        `;
       }
-
-      ;
-    default:
-      return `<p>Failed to take payment: message=${responseFields["responseMessage"]} code=${responseFields["responseCode"]}</p>`;
+  
+      default: {
+        const msg = responseFields["responseMessage"] || "Unknown error";
+        return `
+          <div style="font-family:system-ui;margin:2rem;">
+            <h2>Payment failed</h2>
+            <p>Message: ${msg}</p>
+          </div>
+        `;
+      }
+    }
   }
-}
 
 // Send response helper
 function sendResponse(res, body) {

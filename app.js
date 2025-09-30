@@ -70,7 +70,7 @@ function processResponseFields(req, responseFields) {
           window.location.href = "https://test.ea-dental.com/success";
         })
         .catch(err => {
-          alert("Payment succeeded, but server notify failed: " + err.message);
+          console.error("Payment succeeded, but server notify failed: " + err.message);
         });
         window.location.href = "https://test.ea-dental.com/success";
         return `<p>Payment succeeded. Confirmation sent.</p>`;

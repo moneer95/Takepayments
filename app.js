@@ -67,18 +67,18 @@ function processResponseFields(req, responseFields) {
         .then(res => {
           if (!res.ok) throw new Error("Failed to notify server.");
           // Redirect after success
-          return { status: 200, statusText: "Payment succeeded", url: "https://test.ea-dental.com/success" };
+          return response.redirect("https://test.ea-dental.com/success");
         })
         .catch(err => {
-          return { success: false, message: `Failed to take payment: ${err}` };
+          console.error("Payment succeeded, but server notify failed: " + err.message);
         });
       } catch (err) {
-        return { success: false, message: `Failed to take payment: ${responseFields["responseMessage"]}` };
+        return `<p>Payment succeeded, but failed to notify: ${err.message}</p>`;
       }
 
       ;
     default:
-      return { success: false, message: `Failed to take payment: ${responseFields["responseMessage"]}` };
+      return `<p>Failed to take payment: message=${responseFields["responseMessage"]} code=${responseFields["responseCode"]}</p>`;
   }
 }
 

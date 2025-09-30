@@ -282,7 +282,7 @@ app.use((req, res, next) => {
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Server running on port nn ${PORT}`);
   console.log('Payment init endpoint: POST /init');
   console.log('Session-based 3DS reference storage enabled');
 });

@@ -54,7 +54,7 @@ function processResponseFields(req, responseFields) {
     case "0":
       // Success — make a POST request
       try {
-        fetch("https://ea-dental.com/api/payment-succeed", {
+        fetch("https://test.ea-dental.com/api/payment-succeed", {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
@@ -67,12 +67,12 @@ function processResponseFields(req, responseFields) {
         .then(res => {
           if (!res.ok) throw new Error("Failed to notify server.");
           // Redirect after success
-          window.location.href = "https://ea-dental.com/success";
+          window.location.href = "https://test.ea-dental.com/success";
         })
         .catch(err => {
           alert("Payment succeeded, but server notify failed: " + err.message);
         });
-        window.location.href = "https://ea-dental.com/success";
+        window.location.href = "https://test.ea-dental.com/success";
         return `<p>Payment succeeded. Confirmation sent.</p>`;
       } catch (err) {
         return `<p>Payment succeeded, but failed to notify: ${err.message}</p>`;
@@ -122,7 +122,7 @@ function getInitialFieldsFromSession(req, pageURL, remoteAddress) {
     "customerEmail": req.session.paymentDetails?.customerEmail || "",
     "customerAddress": req.session.paymentDetails?.customerAddress || "",
     "customerPostCode": req.session.paymentDetails?.customerPostCode || "",
-    // "redirectURL ": "https://ea-dental.com/success",
+    // "redirectURL ": "https://test.ea-dental.com/success",
     "orderRef": "Online Payment",
     "remoteAddress": remoteAddress,
     "merchantCategoryCode": 5411,

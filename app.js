@@ -10,6 +10,7 @@ const cors = require('cors')
 const app = express();
 const PORT = 8012;
 
+app.set('trust proxy', 1);
 
 // Enable CORS and session management
 app.use(cors({
@@ -26,10 +27,12 @@ app.use(session({
   resave: true,
   saveUninitialized: false,
   cookie: {
-    secure: false, // Set to true in production with HTTPS
+    secure: true, // Set to true in production with HTTPS
     httpOnly: true,
     maxAge: 15 * 60 * 1000, // 15 minutes
-    sameSite: 'none'
+    sameSite: 'none',
+    domain: '.ea-dental.com'
+
   }
 }));
 

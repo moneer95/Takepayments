@@ -306,6 +306,31 @@ app.get('/', (req, res) => {
 });
 
 app.post('/', (req, res) => {
+
+
+
+  // 🔸 Handle top-level navigation from ACS method-finish
+  if (req.query && req.query.acs === '1' && req.query.threeDSAcsResponse === 'method') {
+    console.log('ACS method-finish (top-level) hit – return minimal HTML (no gateway call).');
+    const html = `
+      <!doctype html>
+      <meta charset="utf-8">
+      <title>Continuing…</title>
+      <p style="font-family:system-ui;margin:2rem;">Continuing authentication…</p>
+      <script>
+        try { window.close(); } catch (e) {}
+        setTimeout(function(){ try { history.length && history.back(); } catch(e){} }, 10);
+      </script>
+      <noscript><p>You can close this tab and return to checkout.</p></noscript>
+    `;
+    res.set('Content-Type', 'text/html');
+    return res.status(200).send(html);
+  }
+
+
+
+
+
   const post = req.parsedBody || {};
 
   // payload shape snapshot (visibility only)

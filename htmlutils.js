@@ -81,59 +81,37 @@ exports.getWrapHTML = function(content) {
 </html>`;
 }
 
-// htmlutils.js
-
-// Renders the 3-D Secure page with:
-//  - a hidden iframe for the issuer 3DS Method ping (if provided)
-//  - a visible iframe that loads the ACS challenge (creq)
-// IMPORTANT: pair this with your server route that returns 204 on
-// POST /?acs=1&threeDSAcsResponse=method
+// add this version (replaces the one I sent) — only the <script> block changed
 exports.showFrameForThreeDS = function showFrameForThreeDS(responseFields) {
-	// PSP field names vary; adjust if yours differ
-	const acsURL =
-	  responseFields['threeDSURL'] ||
-	  responseFields['acsURL'] ||
-	  responseFields['acsUrl'];
-  
-	// Some gateways nest method fields inside threeDSRequest[...], others at top-level
+	const acsURL = responseFields['threeDSURL'] || responseFields['acsURL'] || responseFields['acsUrl'];
 	const threeDSMethodURL =
 	  responseFields['threeDSMethodURL'] ||
 	  responseFields['threeDSMethodUrl'] ||
 	  responseFields['threeDSRequest[threeDSMethodURL]'];
-  
 	const threeDSMethodData =
 	  responseFields['threeDSMethodData'] ||
 	  responseFields['threeDSRequest[threeDSMethodData]'];
   
-	// Collect challenge fields from threeDSRequest[...]
 	const challengeFields = {};
 	for (const [k, v] of Object.entries(responseFields || {})) {
 	  if (k.startsWith('threeDSRequest[')) {
-		const key = k.slice('threeDSRequest['.length, -1); // strip wrapper
+		const key = k.slice('threeDSRequest['.length, -1);
 		challengeFields[key] = v;
 	  }
 	}
-	// Ensure we echo threeDSRef if provided (some PSPs require it back)
-	if (responseFields['threeDSRef']) {
-	  challengeFields['threeDSRef'] = responseFields['threeDSRef'];
-	}
+	if (responseFields['threeDSRef']) challengeFields['threeDSRef'] = responseFields['threeDSRef'];
   
-	const challengeInputs = Object.entries(challengeFields)
+	const inputs = Object.entries(challengeFields)
 	  .map(([k, v]) => `<input type="hidden" name="${escapeAttr(k)}" value="${escapeAttr(String(v))}" />`)
 	  .join('\n');
   
-	const hasMethod = Boolean(threeDSMethodURL && threeDSMethodData);
-	const methodBlock = hasMethod
-	  ? `
-	<!-- Hidden 3DS Method ping -->
-	<iframe name="threeDSMethodFrame" style="display:none;width:0;height:0;border:0;"></iframe>
-	<form id="methodForm" target="threeDSMethodFrame" method="POST" action="${escapeAttr(threeDSMethodURL)}" style="display:none;">
-	  <input type="hidden" name="threeDSMethodData" value="${escapeAttr(threeDSMethodData)}" />
-	</form>`
-	  : ``;
+	const methodBlock = (threeDSMethodURL && threeDSMethodData) ? `
+	  <iframe name="threeDSMethodFrame" style="display:none;width:0;height:0;border:0;"></iframe>
+	  <form id="methodForm" target="threeDSMethodFrame" method="POST" action="${escapeAttr(threeDSMethodURL)}" style="display:none;">
+		<input type="hidden" name="threeDSMethodData" value="${escapeAttr(threeDSMethodData)}" />
+	  </form>` : ``;
   
-	return `
-  <!doctype html>
+	return `<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
 	body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; margin:0; }
@@ -146,36 +124,50 @@ exports.showFrameForThreeDS = function showFrameForThreeDS(responseFields) {
 	<h2>Verifying your payment…</h2>
 	<p class="note">Please don’t close this window.</p>
   
-	<!-- Visible ACS challenge frame -->
-	<iframe class="challenge" name="threeDSChallengeFrame" title="3-D Secure Challenge"></iframe>
+	<iframe class="challenge" name="threeDSChallengeFrame" id="threeDSChallengeFrame" title="3-D Secure Challenge"></iframe>
   
 	${methodBlock}
   
-	<!-- Challenge auto-post -->
-	<form id="challengeForm" target="threeDSChallengeFrame" method="POST" action="${escapeAttr(acsURL || '')}" style="display:none;">
-	  ${challengeInputs}
+	<!-- Primary: challenge to iframe -->
+	<form id="challengeFormIframe" target="threeDSChallengeFrame" method="POST" action="${escapeAttr(acsURL || '')}" style="display:none;">
+	  ${inputs}
+	</form>
+  
+	<!-- Fallback: challenge in top window -->
+	<form id="challengeFormTop" target="_self" method="POST" action="${escapeAttr(acsURL || '')}" style="display:none;">
+	  ${inputs}
 	</form>
   </div>
   
   <script>
-	(function () {
-	  // 1) Kick the issuer's 3DS Method ping in a hidden iframe (best-effort; don't block)
-	  try { var mf = document.getElementById('methodForm'); if (mf) mf.submit(); } catch (e) {}
+  (function () {
+	// Hidden method ping (best-effort)
+	try { var mf = document.getElementById('methodForm'); if (mf) mf.submit(); } catch (e) {}
   
-	  // 2) Immediately submit the challenge to the ACS in the visible iframe
-	  setTimeout(function () {
-		try { document.getElementById('challengeForm').submit(); } catch (e) {}
-	  }, 50);
-	})();
+	var iframe = document.getElementById('threeDSChallengeFrame');
+	var iframeLoaded = false;
+  
+	// If ACS allows framing, the iframe will fire onload at least once
+	try {
+	  iframe.addEventListener('load', function(){ iframeLoaded = true; }, { once: true });
+	} catch (e) {}
+  
+	// Submit the challenge to the iframe
+	try { document.getElementById('challengeFormIframe').submit(); } catch (e) {}
+  
+	// Fallback: if iframe didn't load within ~1200ms, post challenge top-level
+	setTimeout(function () {
+	  if (!iframeLoaded) {
+		try { document.getElementById('challengeFormTop').submit(); } catch (e) {}
+	  }
+	}, 1200);
+  })();
   </script>`;
   };
   
-  // Small helper to safely escape attributes
   function escapeAttr(s) {
 	return String(s)
-	  .replace(/&/g, '&amp;')
-	  .replace(/"/g, '&quot;')
-	  .replace(/</g, '&lt;')
-	  .replace(/>/g, '&gt;');
+	  .replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+	  .replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
   

@@ -36,6 +36,17 @@ app.use(session({
   }
 }));
 
+app.use((req, res, next) => {
+  console.log("---- SESSION DEBUG ----");
+  console.log("Time:", new Date().toISOString());
+  console.log("Session ID:", req.sessionID);
+  console.log("Session data:", req.session);
+  console.log("Cookie header:", req.headers.cookie);
+  console.log("-----------------------");
+  next();
+});
+
+
 // Helper function to check if any key starts with a prefix
 function anyKeyStartsWith(haystack, needle) {
   for ([k, v] of Object.entries(haystack)) {
@@ -172,6 +183,14 @@ app.use(express.json());
 
 // New endpoint for payment initialization
 app.post('/init', (req, res) => {
+
+
+  console.log("INIT CALLED");
+  console.log("Body received:", req.body);
+  console.log("Before saving session:", req.session);
+  
+
+
   try {
     // Validate required fields
     if (!req.body.cardNumber || !req.body.cardExpiryMonth || !req.body.cardExpiryYear || !req.body.cardCVV) {
@@ -196,6 +215,7 @@ app.post('/init', (req, res) => {
 
     // Save session before sending response
     req.session.save(err => {
+      console.log("Session saved successfully:", req.session);
       if (err) {
         console.error('Session save error:', err);
         return res.status(500).json({ error: 'Failed to save session' });
@@ -221,8 +241,17 @@ app.get('/', (req, res) => {
 app.post('/', (req, res) => {
   const post = req.parsedBody || {};
 
+
+
   // Collect browser information
   if (anyKeyStartsWith(post, 'browserInfo[')) {
+
+    console.log("BROWSER INFO RECEIVED");
+    console.log("Parsed post:", post);
+    console.log("Session data before gateway call:", req.session);
+    
+
+
     let fields = getInitialFieldsFromSession(
       req,
       'https://takepayments.ea-dental.com/',
@@ -244,6 +273,13 @@ app.post('/', (req, res) => {
   }
   // Handle 3DS response
   else if (!anyKeyStartsWith(post, 'threeDSResponse[')) {
+
+    console.log("3DS RESPONSE RECEIVED");
+    console.log("Parsed post:", post);
+    console.log("threeDSRef from session:", req.session.threeDSRef);
+  
+
+
     // Validate session has 3DS reference
     if (!req.session.threeDSRef) {
       console.error('No 3DS reference found in session');

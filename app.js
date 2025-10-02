@@ -60,56 +60,63 @@ function anyKeyStartsWith(haystack, needle) {
 // Process gateway responses - now uses session for threeDSRef
 function processResponseFields(req, responseFields) {
   switch (responseFields["responseCode"]) {
-    case "65802":
-      // Store 3DS reference in session
-      req.session.threeDSRef = responseFields["threeDSRef"];
-      req.session.save(); // Explicitly save session
+    case "65802": {
+      // DO NOT overwrite an existing ref – prevents double flow
+      if (!req.session.threeDSRef) {
+        req.session.threeDSRef = responseFields["threeDSRef"];
+        req.session.state = 'threeDSPending';
+        req.session.save(()=>{});
+        console.log("Stored threeDSRef (first time).");
+      } else {
+        console.log("threeDSRef already present – duplicate 65802 ignored.");
+      }
       return htmlUtils.showFrameForThreeDS(responseFields);
-      case "0": {
-        // Fire-and-forget notify; don't block the redirect
-        (async () => {
-          try {
-            const notifyRes = await fetch("https://test.ea-dental.com/api/payment-succeed", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                cart: req.session?.paymentDetails?.cart ?? [],
-                response: responseFields
-              })
-            });
-            if (!notifyRes.ok) {
-              const txt = await notifyRes.text().catch(() => "");
-              throw new Error(`Notify ${notifyRes.status} ${notifyRes.statusText} ${txt}`);
-            }
-          } catch (err) {
-            console.error("Notify failed:", err);
+    }
+
+    case "0": {
+      (async () => {
+        try {
+          const notifyRes = await fetch("https://test.ea-dental.com/api/payment-succeed", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              cart: req.session?.paymentDetails?.cart ?? [],
+              response: responseFields
+            })
+          });
+          if (!notifyRes.ok) {
+            const txt = await notifyRes.text().catch(() => "");
+            throw new Error(`Notify ${notifyRes.status} ${notifyRes.statusText} ${txt}`);
           }
-        })();
-  
-        // Return HTML that redirects in the browser
-        const successUrl = "https://test.ea-dental.com/success";
-        return `
-          <div style="font-family:system-ui;margin:2rem;">
-            <h2>Payment succeeded</h2>
-            <p>Redirecting to confirmation… If you’re not redirected, <a href="${successUrl}">click here</a>.</p>
-          </div>
-          <script>
-            (function(){ location.replace('${successUrl}'); })();
-          </script>
-        `;
-      }
-  
-      default: {
-        const msg = responseFields["responseMessage"] || "Unknown error";
-        return `
-          <div style="font-family:system-ui;margin:2rem;">
-            <h2>Payment failed</h2>
-            <p>Message: ${msg}</p>
-          </div>
-        `;
-      }
+        } catch (err) {
+          console.error("Notify failed:", err);
+        }
+      })();
+
+      const successUrl = "https://test.ea-dental.com/success";
+      return `
+        <div style="font-family:system-ui;margin:2rem;">
+          <h2>Payment succeeded</h2>
+          <p>Redirecting to confirmation… If you’re not redirected, <a href="${successUrl}">click here</a>.</p>
+        </div>
+        <script>(function(){ location.replace('${successUrl}'); })();</script>
+      `;
+    }
+
+    default: {
+      const msg = responseFields["responseMessage"] || "Unknown error";
+      return `
+        <div style="font-family:system-ui;margin:2rem;">
+          <h2>Payment failed</h2>
+          <p>Message: ${msg}</p>
+        </div>
+      `;
     }
   }
+}
+
+
+
 
 // Send response helper
 function sendResponse(res, body) {
@@ -120,43 +127,49 @@ function sendResponse(res, body) {
 
 // Get initial fields using session data
 function getInitialFieldsFromSession(req, pageURL, remoteAddress) {
-  let uniqid = Math.random().toString(36).substr(2, 10);
+  // Reuse per-attempt id
+  const uniqid = req.session.txnUnique || (req.session.txnUnique = Math.random().toString(36).slice(2, 12));
 
-  // Correctly format the URL
-  const correctUrl = pageURL ? `${pageURL}${pageURL.includes('?') ? '&' : '?'}acs=1` : `https://takepayments.ea-dental.com/?acs=1`;
+  const correctUrl = pageURL
+    ? `${pageURL}${pageURL.includes('?') ? '&' : '?'}acs=1`
+    : `https://takepayments.ea-dental.com/?acs=1`;
 
   // Calculate total amount from cart items
   let totalAmount = 0;
   if (req.session.paymentDetails?.cart) {
-    req.session.paymentDetails.cart.forEach(item => {
-      totalAmount += item.price * item.quantity;
-    });
+    for (const item of req.session.paymentDetails.cart) {
+      totalAmount += (item.price || 0) * (item.quantity || 0);
+    }
+  }
+  if (!totalAmount || totalAmount <= 0) {
+    // Defensive guard – don’t ever send zero to gateway
+    throw new Error('Cart total must be greater than 0');
   }
 
   return {
-    "merchantID": "278346",
-    "action": "SALE",
-    "type": 1,
-    "transactionUnique": uniqid,
-    "countryCode": 826,
-    "currencyCode": 826,
-    "amount":  totalAmount * 100,
-    "cardNumber": req.session.paymentDetails?.cardNumber || "",
-    "cardExpiryMonth": req.session.paymentDetails?.cardExpiryMonth || 1,
-    "cardExpiryYear": req.session.paymentDetails?.cardExpiryYear || 30,
-    "cardCVV": req.session.paymentDetails?.cardCVV || "",
-    "customerName": req.session.paymentDetails?.customerName || "",
-    "customerEmail": req.session.paymentDetails?.customerEmail || "",
-    "customerAddress": req.session.paymentDetails?.customerAddress || "",
-    "customerPostCode": req.session.paymentDetails?.customerPostCode || "",
-    // "redirectURL ": "https://test.ea-dental.com/success",
-    "orderRef": "Online Payment",
-    "remoteAddress": remoteAddress,
-    "merchantCategoryCode": 5411,
-    "threeDSVersion": "2",
-    "threeDSRedirectURL": correctUrl
+    merchantID: "278346",
+    action: "SALE",
+    type: 1,
+    transactionUnique: uniqid,
+    countryCode: 826,
+    currencyCode: 826,
+    amount: Math.round(totalAmount * 100),
+    cardNumber: req.session.paymentDetails?.cardNumber || "",
+    cardExpiryMonth: req.session.paymentDetails?.cardExpiryMonth || 1,
+    cardExpiryYear: req.session.paymentDetails?.cardExpiryYear || 30,
+    cardCVV: req.session.paymentDetails?.cardCVV || "",
+    customerName: req.session.paymentDetails?.customerName || "",
+    customerEmail: req.session.paymentDetails?.customerEmail || "",
+    customerAddress: req.session.paymentDetails?.customerAddress || "",
+    customerPostCode: req.session.paymentDetails?.customerPostCode || "",
+    orderRef: "Online Payment",
+    remoteAddress,
+    merchantCategoryCode: 5411,
+    threeDSVersion: "2",
+    threeDSRedirectURL: correctUrl
   };
 }
+
 
 // Middleware to handle raw POST body for non-JSON endpoints
 app.use((req, res, next) => {
@@ -181,20 +194,16 @@ app.use((req, res, next) => {
 // Parse JSON bodies for /init endpoint
 app.use(express.json());
 
-// New endpoint for payment initialization
 app.post('/init', (req, res) => {
-
-
-  console.log("INIT CALLED");
-  console.log("Body received:", req.body);
-  console.log("Before saving session:", req.session);
-  
-
-
   try {
     // Validate required fields
     if (!req.body.cardNumber || !req.body.cardExpiryMonth || !req.body.cardExpiryYear || !req.body.cardCVV) {
       return res.status(400).json({ error: 'Missing required card details' });
+    }
+
+    // One transactionUnique per attempt
+    if (!req.session.txnUnique) {
+      req.session.txnUnique = Math.random().toString(36).slice(2, 12);
     }
 
     // Store payment details in session
@@ -210,18 +219,17 @@ app.post('/init', (req, res) => {
       customerPostCode: req.body.customerPostCode || ""
     };
 
-    // Clear any previous 3DS reference
+    // new state
+    req.session.state = 'init';
+    // ensure no stale ref
     // delete req.session.threeDSRef;
 
     // Save session before sending response
     req.session.save(err => {
-      console.log("Session saved successfully:", req.session);
       if (err) {
         console.error('Session save error:', err);
         return res.status(500).json({ error: 'Failed to save session' });
       }
-
-      // Generate browser info form
       const body = htmlUtils.collectBrowserInfo(req);
       res.set('Content-Type', 'text/html');
       res.send(htmlUtils.getWrapHTML(body));
@@ -238,32 +246,69 @@ app.get('/', (req, res) => {
   sendResponse(res, body);
 });
 
+
+
+
+function isBrowserInfo(post) {
+  return anyKeyStartsWith(post, 'browserInfo[');
+}
+function isThreeDSMethod(post) {
+  // silent device fingerprint ping from ACS
+  return 'threeDSMethodData' in post;
+}
+function isThreeDSChallenge(post) {
+  // actual result of 3DS challenge
+  return 'cres' in post || 'PaRes' in post || anyKeyStartsWith(post, 'threeDSResponse[');
+}
+
+
+
+
+
 app.post('/', (req, res) => {
   const post = req.parsedBody || {};
 
+  // --- DEBUG (keep) ---
+  console.log('POST / hit', {
+    time: new Date().toISOString(),
+    sid: req.sessionID,
+    keys: Object.keys(post),
+    state: req.session?.state,
+    has3DSRef: !!req.session?.threeDSRef
+  });
 
-
-  // Collect browser information
-  if (anyKeyStartsWith(post, 'browserInfo[')) {
-
-    console.log("BROWSER INFO RECEIVED");
-    console.log("Parsed post:", post);
-    console.log("Session data before gateway call:", req.session);
-    
-
-
-    let fields = getInitialFieldsFromSession(
-      req,
-      'https://takepayments.ea-dental.com/',
-      req.ip
-    );
-
-    for ([k, v] of Object.entries(post)) {
-      fields[k.substr(12, k.length - 13)] = v;
+  // 1) Initial browser info → first SALE (expect 65802)
+  if (isBrowserInfo(post)) {
+    // idempotency: if we already moved past this, ignore
+    if (req.session.state === 'threeDSPending' || req.session.state === 'done') {
+      console.log('Duplicate browser-info POST ignored. state=', req.session.state);
+      return res.status(200).send('OK');
     }
 
-    gateway.directRequest(fields).then((response) => {
-      // Pass req to processResponseFields to access session
+    let fields;
+    try {
+      fields = getInitialFieldsFromSession(
+        req,
+        'https://takepayments.ea-dental.com/',
+        req.ip
+      );
+    } catch (e) {
+      console.error('Building fields failed:', e);
+      return res.status(400).send(String(e.message || e));
+    }
+
+    // merge browser info
+    for (const [k, v] of Object.entries(post)) {
+      fields[k.substr(12, k.length - 13)] = v; // strip 'browserInfo[' and trailing ']'
+    }
+
+    console.log('Calling gateway (browser-info hop)', {
+      txn: req.session.txnUnique,
+      amount: fields.amount,
+      state: req.session.state
+    });
+
+    return gateway.directRequest(fields).then((response) => {
       const body = processResponseFields(req, response);
       sendResponse(res, body);
     }).catch((error) => {
@@ -271,52 +316,84 @@ app.post('/', (req, res) => {
       res.status(500).send('Internal Server Error');
     });
   }
-  // Handle 3DS response
-  else if (!anyKeyStartsWith(post, 'threeDSResponse[')) {
 
-    console.log("3DS RESPONSE RECEIVED");
-    console.log("Parsed post:", post);
-    console.log("threeDSRef from session:", req.session.threeDSRef);
-  
+  // 2) 3DS Method ping – DO NOT call gateway, just ack
+  if (isThreeDSMethod(post)) {
+    console.log('3DS METHOD ping received – ignoring (no gateway call).');
+    return res.status(204).end(); // or tiny HTML: res.send('<!doctype html><title>ok</title>')
+  }
 
+  // 3) 3DS Challenge result – final SALE with threeDSRef
+  if (isThreeDSChallenge(post)) {
+    console.log("3DS CHALLENGE RESULT received", { state: req.session.state, hasRef: !!req.session.threeDSRef });
 
-    // Validate session has 3DS reference
+    if (req.session.state === 'done') {
+      console.log('Duplicate 3DS callback ignored.');
+      return res.status(200).send('OK');
+    }
     if (!req.session.threeDSRef) {
-      console.error('No 3DS reference found in session');
+      console.error('Missing threeDSRef in session for challenge result');
       return res.status(400).send('Missing 3DS reference');
     }
 
     let reqFields = {
       action: 'SALE',
       merchantID: "278346",
-      threeDSRef: req.session.threeDSRef, // Use from session
-      threeDSResponse: '',
+      threeDSRef: req.session.threeDSRef,
+      threeDSResponse: ''
     };
 
-    for ([k, v] of Object.entries(post)) {
-      reqFields.threeDSResponse += '[' + k + ']' + '__EQUAL__SIGN__' + v + '&';
+    if ('cres' in post) {
+      // 3DS v2
+      reqFields.threeDSResponse = '[cres]__EQUAL__SIGN__' + post.cres;
+    } else if ('PaRes' in post) {
+      // 3DS v1
+      reqFields.threeDSResponse = '[PaRes]__EQUAL__SIGN__' + post.PaRes;
+    } else if (anyKeyStartsWith(post, 'threeDSResponse[')) {
+      // namespaced shape
+      for (const [k, v] of Object.entries(post)) {
+        reqFields.threeDSResponse += '[' + k + ']' + '__EQUAL__SIGN__' + v + '&';
+      }
+      reqFields.threeDSResponse = reqFields.threeDSResponse.slice(0, -1);
+    } else {
+      console.error('Unrecognized challenge shape', Object.keys(post));
+      return res.status(400).send('Invalid 3DS result');
     }
 
-    reqFields.threeDSResponse = reqFields.threeDSResponse.substr(0, reqFields.threeDSResponse.length - 1);
+    console.log('Calling gateway (3DS hop)', {
+      txn: req.session.txnUnique,
+      has3DSRef: !!req.session.threeDSRef,
+      state: req.session.state
+    });
 
-    gateway.directRequest(reqFields).then((response) => {
-      // Pass req to processResponseFields to access session
+    return gateway.directRequest(reqFields).then((response) => {
+      console.log('3DS final gateway response', { code: response.responseCode, msg: response.responseMessage });
+
       const body = processResponseFields(req, response);
       sendResponse(res, body);
 
-      // Clear sensitive data after successful payment
       if (response.responseCode === "0") {
+        req.session.state = 'done';
         delete req.session.paymentDetails;
-        // delete req.session.threeDSRef;
+        delete req.session.threeDSRef;
+        delete req.session.txnUnique;
+        req.session.save(()=>{});
       }
     }).catch((error) => {
-      console.error(error);
+      console.error('3DS final error', error);
       res.status(500).send('Internal Server Error');
     });
-  } else {
-    res.status(400).send('Invalid request format');
   }
+
+  // 4) Everything else
+  console.log('Unknown POST keys:', Object.keys(post));
+  return res.status(400).send('Invalid request format');
 });
+
+
+
+
+
 
 // Error handling
 app.use((err, req, res, next) => {

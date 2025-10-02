@@ -81,17 +81,26 @@ exports.getWrapHTML = function(content) {
 </html>`;
 }
 
-// add this version (replaces the one I sent) — only the <script> block changed
+// htmlutils.js
+
 exports.showFrameForThreeDS = function showFrameForThreeDS(responseFields) {
-	const acsURL = responseFields['threeDSURL'] || responseFields['acsURL'] || responseFields['acsUrl'];
+	// PSP field names (adjust if yours differ)
+	const acsURL =
+	  responseFields['threeDSURL'] ||
+	  responseFields['acsURL'] ||
+	  responseFields['acsUrl'];
+  
+	// Method fields may be nested or top-level depending on gateway
 	const threeDSMethodURL =
 	  responseFields['threeDSMethodURL'] ||
 	  responseFields['threeDSMethodUrl'] ||
 	  responseFields['threeDSRequest[threeDSMethodURL]'];
+  
 	const threeDSMethodData =
 	  responseFields['threeDSMethodData'] ||
 	  responseFields['threeDSRequest[threeDSMethodData]'];
   
+	// Collect challenge fields (e.g., creq, and others) from threeDSRequest[...]
 	const challengeFields = {};
 	for (const [k, v] of Object.entries(responseFields || {})) {
 	  if (k.startsWith('threeDSRequest[')) {
@@ -99,17 +108,23 @@ exports.showFrameForThreeDS = function showFrameForThreeDS(responseFields) {
 		challengeFields[key] = v;
 	  }
 	}
-	if (responseFields['threeDSRef']) challengeFields['threeDSRef'] = responseFields['threeDSRef'];
+	// Echo threeDSRef if provided (some PSPs require it)
+	if (responseFields['threeDSRef']) {
+	  challengeFields['threeDSRef'] = responseFields['threeDSRef'];
+	}
   
-	const inputs = Object.entries(challengeFields)
+	const challengeInputs = Object.entries(challengeFields)
 	  .map(([k, v]) => `<input type="hidden" name="${escapeAttr(k)}" value="${escapeAttr(String(v))}" />`)
 	  .join('\n');
   
-	const methodBlock = (threeDSMethodURL && threeDSMethodData) ? `
+	const hasMethod = Boolean(threeDSMethodURL && threeDSMethodData);
+	const methodBlock = hasMethod ? `
+	  <!-- Hidden 3DS Method ping -->
 	  <iframe name="threeDSMethodFrame" style="display:none;width:0;height:0;border:0;"></iframe>
 	  <form id="methodForm" target="threeDSMethodFrame" method="POST" action="${escapeAttr(threeDSMethodURL)}" style="display:none;">
 		<input type="hidden" name="threeDSMethodData" value="${escapeAttr(threeDSMethodData)}" />
-	  </form>` : ``;
+	  </form>
+	` : ``;
   
 	return `<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -124,38 +139,35 @@ exports.showFrameForThreeDS = function showFrameForThreeDS(responseFields) {
 	<h2>Verifying your payment…</h2>
 	<p class="note">Please don’t close this window.</p>
   
+	<!-- Visible ACS challenge frame -->
 	<iframe class="challenge" name="threeDSChallengeFrame" id="threeDSChallengeFrame" title="3-D Secure Challenge"></iframe>
   
 	${methodBlock}
   
 	<!-- Primary: challenge to iframe -->
 	<form id="challengeFormIframe" target="threeDSChallengeFrame" method="POST" action="${escapeAttr(acsURL || '')}" style="display:none;">
-	  ${inputs}
+	  ${challengeInputs}
 	</form>
   
-	<!-- Fallback: challenge in top window -->
+	<!-- Fallback: challenge in top window if iframe is blocked -->
 	<form id="challengeFormTop" target="_self" method="POST" action="${escapeAttr(acsURL || '')}" style="display:none;">
-	  ${inputs}
+	  ${challengeInputs}
 	</form>
   </div>
   
   <script>
   (function () {
-	// Hidden method ping (best-effort)
+	// 1) Kick the issuer's 3DS Method ping (silent)
 	try { var mf = document.getElementById('methodForm'); if (mf) mf.submit(); } catch (e) {}
   
+	// 2) Submit challenge to iframe
 	var iframe = document.getElementById('threeDSChallengeFrame');
 	var iframeLoaded = false;
+	try { iframe.addEventListener('load', function(){ iframeLoaded = true; }, { once: true }); } catch(e){}
   
-	// If ACS allows framing, the iframe will fire onload at least once
-	try {
-	  iframe.addEventListener('load', function(){ iframeLoaded = true; }, { once: true });
-	} catch (e) {}
-  
-	// Submit the challenge to the iframe
 	try { document.getElementById('challengeFormIframe').submit(); } catch (e) {}
   
-	// Fallback: if iframe didn't load within ~1200ms, post challenge top-level
+	// 3) Fallback: if ACS blocks iframing (no onload), post in top window
 	setTimeout(function () {
 	  if (!iframeLoaded) {
 		try { document.getElementById('challengeFormTop').submit(); } catch (e) {}
@@ -165,9 +177,12 @@ exports.showFrameForThreeDS = function showFrameForThreeDS(responseFields) {
   </script>`;
   };
   
+  // helper
   function escapeAttr(s) {
 	return String(s)
-	  .replace(/&/g, '&amp;').replace(/"/g, '&quot;')
-	  .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+	  .replace(/&/g, '&amp;')
+	  .replace(/"/g, '&quot;')
+	  .replace(/</g, '&lt;')
+	  .replace(/>/g, '&gt;');
   }
   

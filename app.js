@@ -47,6 +47,17 @@ app.use((req, res, next) => {
 });
 
 
+function escapeHtml(s = '') {
+  return String(s)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;');
+}
+
+
+
 // Helper function to check if any key starts with a prefix
 function anyKeyStartsWith(haystack, needle) {
   for ([k, v] of Object.entries(haystack)) {
@@ -242,8 +253,39 @@ app.post('/init', (req, res) => {
 
 // Existing endpoints
 app.get('/', (req, res) => {
+  // If ACS returned here, convert GET query into a POST to "/"
+  if (req.query.acs === '1') {
+    const acsResponse = req.query.threeDSAcsResponse || req.query.cres || '';
+    // If nothing meaningful, just acknowledge
+    if (!acsResponse) {
+      return res.status(200).send('<!doctype html><title>3DS</title><p>Waiting for authentication…</p>');
+    }
+    // Build a minimal auto-post that your POST "/" handler will consume
+    const isCres = !!req.query.cres || /[A-Za-z0-9+/=]/.test(acsResponse);
+    const hiddenName = req.query.cres ? 'cres' : (req.query.threeDSAcsResponse ? 'cres' : 'cres'); 
+    // Most gateways expect "cres" on the server side
+
+    const html = `
+      <!doctype html>
+      <html><head><meta charset="utf-8"><title>Completing authentication…</title></head>
+      <body>
+        <form id="threeDSRelay" method="post" action="/" style="display:none">
+          <input type="hidden" name="${hiddenName}" value="${escapeHtml(acsResponse)}">
+        </form>
+        <script>document.getElementById('threeDSRelay').submit();</script>
+        <noscript>
+          <p>Click continue to complete your payment.</p>
+          <button form="threeDSRelay" type="submit">Continue</button>
+        </noscript>
+      </body></html>
+    `;
+    res.set('Content-Type', 'text/html');
+    return res.status(200).send(html);
+  }
+
+  // Normal first load → collect browser info
   const body = htmlUtils.collectBrowserInfo(req);
-  sendResponse(res, body);
+  return sendResponse(res, body);
 });
 
 

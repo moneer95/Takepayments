@@ -12,7 +12,41 @@ const PORT = 8012;
 
 app.set('trust proxy', 1);
 
-// Enable CORS and session management
+// ===== LOG HELPERS (safe, non-invasive) =====
+function maskCard(num = "") {
+  const s = String(num || "");
+  if (s.length < 10) return "***";
+  return s.slice(0, 6) + "******" + s.slice(-4);
+}
+function maskEmail(e = "") {
+  const [u, d] = String(e || "").split("@");
+  if (!d) return e;
+  return (u ? u[0] : "") + "***@" + d;
+}
+function redact(obj) {
+  try {
+    const clone = JSON.parse(JSON.stringify(obj || {}));
+    const S = new Set(["cardNumber","cardCVV","cvv","pan","password","authorization"]);
+    for (const k of Object.keys(clone)) {
+      const v = clone[k];
+      if (S.has(k)) clone[k] = "***";
+      if (k.toLowerCase().includes("email")) clone[k] = maskEmail(v);
+      if (k.toLowerCase().includes("cardnumber") || k.toLowerCase() === "pan") clone[k] = maskCard(v);
+    }
+    return clone;
+  } catch {
+    return obj;
+  }
+}
+function logKV(title, kv) {
+  try {
+    console.log(title, JSON.stringify(kv, null, 2));
+  } catch {
+    console.log(title, kv);
+  }
+}
+
+// ===== Enable CORS and session management =====
 app.use(cors({
   origin: 'https://test.ea-dental.com', // Allow any origin
   credentials: true,
@@ -20,9 +54,7 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
-
-
-// Configure session middleware
+// ===== Session middleware =====
 app.use(session({
   secret: 'GACp0xq7o0LXokGC9U9uYKeR3OCXWABfPutwyc55zQ', // Change this to a strong secret
   resave: true,
@@ -33,10 +65,28 @@ app.use(session({
     maxAge: 15 * 60 * 1000, // 15 minutes
     sameSite: 'none',
     domain: '.ea-dental.com'
-
   }
 }));
 
+// ===== Request-line + latency logger (no behavior change) =====
+app.use((req, res, next) => {
+  req._t0 = process.hrtime.bigint();
+  console.log(`➡️  ${req.method} ${req.originalUrl}`);
+  console.log("   headers:", {
+    origin: req.headers.origin,
+    referer: req.headers.referer,
+    'content-type': req.headers['content-type'],
+    cookie: !!req.headers.cookie ? "present" : "none"
+  });
+  res.on('finish', () => {
+    const t1 = process.hrtime.bigint();
+    const ms = Number(t1 - req._t0) / 1e6;
+    console.log(`⬅️  ${req.method} ${req.originalUrl} → ${res.statusCode} (${ms.toFixed(1)}ms)`);
+  });
+  next();
+});
+
+// ===== Session debug (kept) =====
 app.use((req, res, next) => {
   console.log("---- SESSION DEBUG ----");
   console.log("Time:", new Date().toISOString());
@@ -46,7 +96,6 @@ app.use((req, res, next) => {
   console.log("-----------------------");
   next();
 });
-
 
 // Helper function to check if any key starts with a prefix
 function anyKeyStartsWith(haystack, needle) {
@@ -60,57 +109,67 @@ function anyKeyStartsWith(haystack, needle) {
 
 // Process gateway responses - now uses session for threeDSRef
 function processResponseFields(req, responseFields) {
+  // LOG ENTRY
+  logKV("🔎 processResponseFields →", {
+    code: responseFields["responseCode"],
+    msg: responseFields["responseMessage"],
+    hasThreeDSRef: !!responseFields["threeDSRef"]
+  });
+
   switch (responseFields["responseCode"]) {
     case "65802":
+      console.log("   storing threeDSRef into session");
       // Store 3DS reference in session
       req.session.threeDSRef = responseFields["threeDSRef"];
-      req.session.save(); // Explicitly save session
+      req.session.save(() => console.log("   session saved with threeDSRef"));
       return htmlUtils.showFrameForThreeDS(responseFields);
-      case "0": {
-        // Fire-and-forget notify; don't block the redirect
-        (async () => {
-          try {
-            const notifyRes = await fetch("https://test.ea-dental.com/api/payment-succeed", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                cart: req.session?.paymentDetails?.cart ?? [],
-                response: responseFields
-              })
-            });
-            if (!notifyRes.ok) {
-              const txt = await notifyRes.text().catch(() => "");
-              throw new Error(`Notify ${notifyRes.status} ${notifyRes.statusText} ${txt}`);
-            }
-          } catch (err) {
-            console.error("Notify failed:", err);
+    case "0": {
+      console.log("   final success (responseCode 0)");
+      // Fire-and-forget notify; don't block the redirect
+      (async () => {
+        try {
+          const notifyRes = await fetch("https://test.ea-dental.com/api/payment-succeed", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              cart: req.session?.paymentDetails?.cart ?? [],
+              response: responseFields
+            })
+          });
+          if (!notifyRes.ok) {
+            const txt = await notifyRes.text().catch(() => "");
+            throw new Error(`Notify ${notifyRes.status} ${notifyRes.statusText} ${txt}`);
           }
-        })();
-  
-        // Return HTML that redirects in the browser
-        const successUrl = "https://test.ea-dental.com/success";
-        return `
-          <div style="font-family:system-ui;margin:2rem;">
-            <h2>Payment succeeded</h2>
-            <p>Redirecting to confirmation… If you’re not redirected, <a href="${successUrl}">click here</a>.</p>
-          </div>
-          <script>
-            (function(){ location.replace('${successUrl}'); })();
-          </script>
-        `;
-      }
-  
-      default: {
-        const msg = responseFields["responseMessage"] || "Unknown error";
-        return `
-          <div style="font-family:system-ui;margin:2rem;">
-            <h2>Payment failed</h2>
-            <p>Message: ${msg}</p>
-          </div>
-        `;
-      }
+        } catch (err) {
+          console.error("Notify failed:", err);
+        }
+      })();
+
+      // Return HTML that redirects in the browser
+      const successUrl = "https://test.ea-dental.com/success";
+      return `
+        <div style="font-family:system-ui;margin:2rem;">
+          <h2>Payment succeeded</h2>
+          <p>Redirecting to confirmation… If you’re not redirected, <a href="${successUrl}">click here</a>.</p>
+        </div>
+        <script>
+          (function(){ location.replace('${successUrl}'); })();
+        </script>
+      `;
+    }
+
+    default: {
+      console.warn("   non-success code:", responseFields["responseCode"], responseFields["responseMessage"]);
+      const msg = responseFields["responseMessage"] || "Unknown error";
+      return `
+        <div style="font-family:system-ui;margin:2rem;">
+          <h2>Payment failed</h2>
+          <p>Message: ${msg}</p>
+        </div>
+      `;
     }
   }
+}
 
 // Send response helper
 function sendResponse(res, body) {
@@ -133,6 +192,15 @@ function getInitialFieldsFromSession(req, pageURL, remoteAddress) {
       totalAmount += item.price * item.quantity;
     });
   }
+
+  // LOG BUILD
+  logKV("🧮 building initial fields", {
+    uniqid,
+    totalAmount,
+    ip: remoteAddress,
+    redirect: correctUrl,
+    customerEmail: maskEmail(req.session.paymentDetails?.customerEmail),
+  });
 
   return {
     "merchantID": "278346",
@@ -185,12 +253,9 @@ app.use(express.json());
 // New endpoint for payment initialization
 app.post('/init', (req, res) => {
 
-
   console.log("INIT CALLED");
-  console.log("Body received:", req.body);
+  logKV("Body received:", redact(req.body));
   console.log("Before saving session:", req.session);
-  
-
 
   try {
     // Validate required fields
@@ -235,6 +300,7 @@ app.post('/init', (req, res) => {
 
 // Existing endpoints
 app.get('/', (req, res) => {
+  console.log("GET /", { query: req.query, hasCookie: !!req.headers.cookie });
   const body = htmlUtils.collectBrowserInfo(req);
   sendResponse(res, body);
 });
@@ -242,16 +308,21 @@ app.get('/', (req, res) => {
 app.post('/', (req, res) => {
   const post = req.parsedBody || {};
 
-
+  // payload shape snapshot (visibility only)
+  logKV("POST / payload keys", Object.keys(post));
+  console.log("   has browserInfo? ", anyKeyStartsWith(post, 'browserInfo['));
+  console.log("   has threeDSMethodData? ", 'threeDSMethodData' in post);
+  console.log("   has cres? ", 'cres' in post);
+  console.log("   has PaRes? ", 'PaRes' in post);
+  console.log("   has threeDSResponse[...]", anyKeyStartsWith(post, 'threeDSResponse['));
+  console.log("   session.threeDSRef present? ", !!req.session.threeDSRef);
 
   // Collect browser information
   if (anyKeyStartsWith(post, 'browserInfo[')) {
 
     console.log("BROWSER INFO RECEIVED");
-    console.log("Parsed post:", post);
+    logKV("Parsed post:", redact(post));
     console.log("Session data before gateway call:", req.session);
-    
-
 
     let fields = getInitialFieldsFromSession(
       req,
@@ -263,12 +334,29 @@ app.post('/', (req, res) => {
       fields[k.substr(12, k.length - 13)] = v;
     }
 
+    // gateway call log (browser-info hop)
+    console.log("➡️ gateway.directRequest (browser-info)");
+    logKV("  fields", {
+      action: fields.action,
+      amount: fields.amount,
+      transactionUnique: fields.transactionUnique,
+      customerEmail: maskEmail(fields.customerEmail),
+      threeDSRedirectURL: fields.threeDSRedirectURL
+    });
+
     gateway.directRequest(fields).then((response) => {
+      // response log
+      logKV("⬅️ gateway response (browser-info)", {
+        code: response.responseCode,
+        msg: response.responseMessage,
+        threeDSRef: response.threeDSRef ? "[present]" : "[none]"
+      });
+
       // Pass req to processResponseFields to access session
       const body = processResponseFields(req, response);
       sendResponse(res, body);
     }).catch((error) => {
-      console.error(error);
+      console.error("❌ gateway error (browser-info):", error && (error.stack || error));
       res.status(500).send('Internal Server Error');
     });
   }
@@ -276,10 +364,8 @@ app.post('/', (req, res) => {
   else if (!anyKeyStartsWith(post, 'threeDSResponse[')) {
 
     console.log("3DS RESPONSE RECEIVED");
-    console.log("Parsed post:", post);
+    logKV("Parsed post:", redact(post));
     console.log("threeDSRef from session:", req.session.threeDSRef);
-  
-
 
     // Validate session has 3DS reference
     if (!req.session.threeDSRef) {
@@ -300,21 +386,36 @@ app.post('/', (req, res) => {
 
     reqFields.threeDSResponse = reqFields.threeDSResponse.substr(0, reqFields.threeDSResponse.length - 1);
 
+    console.log("➡️ gateway.directRequest (3DS-final)");
+    logKV("  reqFields", {
+      action: reqFields.action,
+      hasThreeDSRef: !!reqFields.threeDSRef,
+      threeDSResponseLength: (reqFields.threeDSResponse || '').length,
+      threeDSResponsePreview: String(reqFields.threeDSResponse || '').slice(0, 60) + "…"
+    });
+
     gateway.directRequest(reqFields).then((response) => {
+      logKV("⬅️ gateway response (3DS-final)", {
+        code: response.responseCode,
+        msg: response.responseMessage
+      });
+
       // Pass req to processResponseFields to access session
       const body = processResponseFields(req, response);
       sendResponse(res, body);
 
       // Clear sensitive data after successful payment
       if (response.responseCode === "0") {
+        console.log("Clearing session paymentDetails after success");
         delete req.session.paymentDetails;
         // delete req.session.threeDSRef;
       }
     }).catch((error) => {
-      console.error(error);
+      console.error("❌ gateway error (3DS-final):", error && (error.stack || error));
       res.status(500).send('Internal Server Error');
     });
   } else {
+    console.log("POST / fell into 'Invalid request format' branch");
     res.status(400).send('Invalid request format');
   }
 });
@@ -331,7 +432,6 @@ app.use((req, res, next) => {
   console.log('Session data:', req.session);
   next();
 });
-
 
 // Start server
 app.listen(PORT, () => {

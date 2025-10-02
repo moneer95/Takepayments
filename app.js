@@ -26,7 +26,7 @@ function maskEmail(e = "") {
 function redact(obj) {
   try {
     const clone = JSON.parse(JSON.stringify(obj || {}));
-    const S = new Set(["cardNumber", "cardCVV", "cvv", "pan", "password", "authorization"]);
+    const S = new Set(["cardNumber","cardCVV","cvv","pan","password","authorization"]);
     for (const k of Object.keys(clone)) {
       const v = clone[k];
       if (S.has(k)) clone[k] = "***";
@@ -209,7 +209,7 @@ function getInitialFieldsFromSession(req, pageURL, remoteAddress) {
     "transactionUnique": uniqid,
     "countryCode": 826,
     "currencyCode": 826,
-    "amount": totalAmount * 100,
+    "amount":  totalAmount * 100,
     "cardNumber": req.session.paymentDetails?.cardNumber || "",
     "cardExpiryMonth": req.session.paymentDetails?.cardExpiryMonth || 1,
     "cardExpiryYear": req.session.paymentDetails?.cardExpiryYear || 30,
@@ -306,13 +306,6 @@ app.get('/', (req, res) => {
 });
 
 app.post('/', (req, res) => {
-
-
-
-
-
-
-  
   const post = req.parsedBody || {};
 
   // payload shape snapshot (visibility only)
@@ -323,16 +316,6 @@ app.post('/', (req, res) => {
   console.log("   has PaRes? ", 'PaRes' in post);
   console.log("   has threeDSResponse[...]", anyKeyStartsWith(post, 'threeDSResponse['));
   console.log("   session.threeDSRef present? ", !!req.session.threeDSRef);
-
-
-  // before your final-3DS branch
-  if ('threeDSMethodData' in post) {
-    console.log('3DS METHOD ping – ignoring (no gateway call).');
-    return res.status(204).end();
-  }
-
-
-
 
   // Collect browser information
   if (anyKeyStartsWith(post, 'browserInfo[')) {
@@ -378,7 +361,7 @@ app.post('/', (req, res) => {
     });
   }
   // Handle 3DS response
-  else if (anyKeyStartsWith(post, 'threeDSResponse[') || 'cres' in post || 'PaRes' in post) {
+  else if (!anyKeyStartsWith(post, 'threeDSResponse[')) {
 
     console.log("3DS RESPONSE RECEIVED");
     logKV("Parsed post:", redact(post));

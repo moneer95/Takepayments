@@ -369,13 +369,15 @@ app.post('/', (req, res) => {
     console.log("3DS METHOD PING RECEIVED");
     logKV("Parsed post:", redact(post));
     console.log("threeDSRef (should already exist OR follow soon):", req.session.threeDSRef);
-
-    // Typically you just acknowledge and show a tiny holding page while ACS redirects/loads the challenge.
-    const body = htmlUtils.showAcsHoldingPage
-      ? htmlUtils.showAcsHoldingPage()
-      : `<div style="font-family:system-ui;margin:2rem;"><p>Processing…</p></div>`;
-    return sendResponse(res, body);
+  
+    // Important: respond with no content so the hidden iframe doesn't replace the page.
+    return res.status(204).end();
+  
+    // Alternative if you prefer 200:
+    // res.set('Content-Type','text/html');
+    // return res.end('<!doctype html><title></title>');
   }
+
 
   // 3) Final 3DS result (cres / PaRes)
   if ('cres' in post || 'PaRes' in post || anyKeyStartsWith(post, 'threeDSResponse[')) {

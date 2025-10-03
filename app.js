@@ -84,8 +84,33 @@ var server = http.createServer(function(req, res) { //create web server
                 // Also catches any continuation challenges and continues to post
                 // until we ultimately receive an auth code
             } else if (post.action === 'collect_payment') {
-                // Store payment data in cookie and redirect to browser info collection
-                setCookie(res, 'paymentData', JSON.stringify(post), { maxAge: 300, httpOnly: true, secure: true, sameSite: 'None' });
+                // Create complete gateway fields and store in cookie
+                let uniqid = Math.random().toString(36).substr(2, 10);
+                const completePaymentData = {
+                    // Form data
+                    cardNumber: post.cardNumber,
+                    cardExpiryMonth: post.cardExpiryMonth,
+                    cardExpiryYear: post.cardExpiryYear,
+                    cardCVV: post.cardCVV,
+                    customerName: post.customerName,
+                    customerEmail: post.customerEmail,
+                    customerAddress: post.customerAddress,
+                    customerPostCode: post.customerPostCode,
+                    amount: post.amount,
+                    
+                    // Gateway configuration
+                    merchantID: process.env.GATEWAY_MERCHANT_ID || "278346",
+                    action: "SALE",
+                    type: 1,
+                    transactionUnique: uniqid,
+                    countryCode: 826,
+                    currencyCode: 826,
+                    merchantCategoryCode: Number(process.env.GATEWAY_MCC || 5411),
+                    threeDSVersion: "2",
+                    orderRef: "Online Purchase"
+                };
+                
+                setCookie(res, 'paymentData', JSON.stringify(completePaymentData), { maxAge: 300, httpOnly: true, secure: true, sameSite: 'None' });
                 body = htmlUtils.collectBrowserInfo(req);
                 sendResponse(body, res);
             } else if (!anyKeyStartsWith(post, 'threeDSResponse[')) {
@@ -219,19 +244,15 @@ function getPaymentForm() {
     `;
 }
 
-// This provides data from form for production use
+// This provides data from cookie for production use
 function getInitialFields(pageURL, remoteAddress, paymentData = {}) {
-    let uniqid = Math.random().toString(36).substr(2, 10)
-
     return {
-        "merchantID": process.env.GATEWAY_MERCHANT_ID || "278346",
-        "merchantPwd": process.env.GATEWAY_MERCHANT_PWD || null,
-        "merchantSecret": process.env.GATEWAY_MERCHANT_SECRET || "5CZ4T3pdVLUN011UrKFD",
-        "action": "SALE",
-        "type": 1,
-        "transactionUnique": uniqid,
-        "countryCode": 826,
-        "currencyCode": 826,
+        "merchantID": paymentData.merchantID || process.env.GATEWAY_MERCHANT_ID || "278346",
+        "action": paymentData.action || "SALE",
+        "type": paymentData.type || 1,
+        "transactionUnique": paymentData.transactionUnique || Math.random().toString(36).substr(2, 10),
+        "countryCode": paymentData.countryCode || 826,
+        "currencyCode": paymentData.currencyCode || 826,
         "amount": Number(paymentData.amount) || 1000,
         "cardNumber": paymentData.cardNumber || "",
         "cardExpiryMonth": Number(paymentData.cardExpiryMonth) || 0,
@@ -241,13 +262,13 @@ function getInitialFields(pageURL, remoteAddress, paymentData = {}) {
         "customerEmail": paymentData.customerEmail || "",
         "customerAddress": paymentData.customerAddress || "",
         "customerPostCode": paymentData.customerPostCode || "",
-        "orderRef": "Online Purchase",
+        "orderRef": paymentData.orderRef || "Online Purchase",
 
         // The following fields are mandatory for 3DSv2 direct integration only
         "remoteAddress": remoteAddress,
 
-        "merchantCategoryCode": Number(process.env.GATEWAY_MCC || 5411),
-        "threeDSVersion": "2",
+        "merchantCategoryCode": paymentData.merchantCategoryCode || Number(process.env.GATEWAY_MCC || 5411),
+        "threeDSVersion": paymentData.threeDSVersion || "2",
         "threeDSRedirectURL": pageURL + "&acs=1"
     }
 }

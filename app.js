@@ -108,7 +108,7 @@ var server = http.createServer(function(req, res) { //create web server
                     return sendResponse('<p>Session expired. Please try again.</p>', res);
                 }
                 
-                let fields = getInitialFields('https://takepayments.ea-dental.com/', req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1', session.paymentData);
+                let fields = getInitialFields('https://takepayments.ea-dental.com/', '127.0.0.1', session.paymentData);
                 for ([k, v] of Object.entries(post)) {
                     fields[k.substr(12, k.length - 13)] = v;
                 }

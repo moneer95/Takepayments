@@ -142,7 +142,7 @@ function getInitialFields(pageURL, remoteAddress) {
         "amount": 1001,
         "cardNumber": "4012001037141112",
         "cardExpiryMonth": 12,
-        "cardExpiryYear": 2025,
+        "cardExpiryYear": 30,
         "cardCVV": "083",
         "customerName": "Test Customer",
         "customerEmail": "test@testcustomer.com",

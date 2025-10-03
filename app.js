@@ -1,215 +1,206 @@
-// server.js — JSON-ready, no globals, 3DS ref passed via hidden field
-
 const http = require('http');
 const qs = require('querystring');
 const url = require('url');
+const { Gateway } = require('./gateway');
+const htmlUtils = require('./htmlutils');
 
-const htmlUtils = require('./htmlutils.js'); // uses collectBrowserInfo(req), getWrapHTML()
-const { Gateway: gateway } = require('./gateway.js');
+function parseCookies(req) {
+	const header = req.headers.cookie || '';
+	return header.split(';').reduce((acc, part) => {
+		const [k, v] = part.split('=');
+		if (k && v) acc[k.trim()] = decodeURIComponent(v.trim());
+		return acc;
+	}, {});
+}
 
-// ----------------- helpers -----------------
+function setCookie(res, name, value, { maxAge = 900, path = '/', secure = true, httpOnly = true, sameSite = 'None' } = {}) {
+	const parts = [
+		`${name}=${encodeURIComponent(value)}`,
+		`Max-Age=${maxAge}`,
+		`Path=${path}`,
+		secure ? 'Secure' : '',
+		httpOnly ? 'HttpOnly' : '',
+		sameSite ? `SameSite=${sameSite}` : ''
+	].filter(Boolean);
+	const existing = res.getHeader('Set-Cookie');
+	const next = existing ? (Array.isArray(existing) ? existing.concat(parts.join('; ')) : [existing, parts.join('; ')]) : parts.join('; ');
+	res.setHeader('Set-Cookie', next);
+}
+
+function clearCookie(res, name) {
+	setCookie(res, name, '', { maxAge: 0 });
+}
+
+function json(res, status, data) {
+	res.writeHead(status, { 'Content-Type': 'application/json' });
+	res.end(JSON.stringify(data));
+}
+
+function sendHtml(res, body) {
+	res.writeHead(200, { 'Content-Type': 'text/html' });
+	res.end(htmlUtils.getWrapHTML(body));
+}
+
+function mapFrontendPayloadToGateway(payload, { pageURL, remoteAddress }) {
+	const transactionUnique = Math.random().toString(36).substr(2, 10);
+	const amountMinorUnits = resolveAmountFromCart(payload.cart);
+	return {
+		action: 'SALE',
+		merchantID: '278346',
+		merchantPwd: null,
+		merchantSecret: "5CZ4T3pdVLUN011UrKFD",
+		type: 1,
+		transactionUnique,
+		countryCode: 826,
+		currencyCode: 826,
+		amount: amountMinorUnits,
+		cardNumber: payload.cardNumber,
+		cardExpiryMonth: Number(payload.cardExpiryMonth),
+		cardExpiryYear: Number(payload.cardExpiryYear),
+		cardCVV: payload.cardCVV,
+		customerName: payload.customerName,
+		customerEmail: payload.customerEmail,
+		customerAddress: payload.customerAddress,
+		customerPostCode: payload.customerPostCode,
+		orderRef: 'Checkout purchase',
+		remoteAddress,
+		merchantCategoryCode: Number(process.env.GATEWAY_MCC || 5411),
+		threeDSVersion: '2',
+		threeDSRedirectURL: pageURL + (pageURL.includes('?') ? '&' : '?') + 'acs=1'
+	};
+}
+
+function resolveAmountFromCart(cart) {
+	if (!Array.isArray(cart) || cart.length === 0) return 0;
+	let total = 0;
+	for (const item of cart) {
+		const price = Number(item.price || 0);
+		const qty = Number(item.quantity || 1);
+		total += price * qty;
+	}
+	return Math.round(total * 100);
+}
 
 function anyKeyStartsWith(haystack, needle) {
-  for (const [k] of Object.entries(haystack)) {
-    if (k.startsWith(needle)) return true;
-  }
-  return false;
+	for ([k, v] of Object.entries(haystack)) {
+		if (k.startsWith(needle)) return true;
+	}
+	return false;
 }
 
-function sendResponse(body, res) {
-  res.writeHead(200, { 'Content-Type': 'text/html' });
-  res.write(htmlUtils.getWrapHTML(body));
-  res.end();
-}
+const server = http.createServer(async (req, res) => {
+	const parsedUrl = url.parse(req.url, true);
+	const method = req.method || 'GET';
+	const isRoot = parsedUrl.pathname === '/' || parsedUrl.pathname === '';
 
-// Build a transaction payload from the incoming POST body (JSON or form)
-// Only assign if present in the POST (so you can choose what to send from the front end)
-function buildGatewayFields(req, post) {
-  const uniqid = Math.random().toString(36).substr(2, 10);
-  const remoteAddress = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1')
-    .toString()
-    .split(',')[0]
-    .trim();
+	if (!isRoot) {
+		res.statusCode = 404;
+		return res.end('Not Found');
+	}
 
-  const fields = {
-    merchantID: "278346",
-    action: "SALE",
-    type: 1,
-    transactionUnique: uniqid,
-    countryCode: 826,
-    currencyCode: 826,
-    remoteAddress,
-    merchantCategoryCode: 5411,
-    threeDSVersion: "2",
-    threeDSRedirectURL: "https://gateway.example.com/&acs=1",
-  };
+	// Step 1: On GET (or first visit), return browser info collector form
+	if (method !== 'POST') {
+		const body = htmlUtils.collectBrowserInfo(req);
+		return sendHtml(res, body);
+	}
 
-  // Assign from your JSON/form payload if provided
-  // (You said “no need for validation” — keeping this literal/straight-through)
-  if (post.amount !== undefined) fields.amount = post.amount;
-  if (post.cardNumber) fields.cardNumber = String(post.cardNumber).replace(/\s+/g, '');
-  if (post.cardExpiryMonth) fields.cardExpiryMonth = post.cardExpiryMonth;
-  if (post.cardExpiryYear) fields.cardExpiryYear = post.cardExpiryYear;
-  if (post.cardCVV) fields.cardCVV = post.cardCVV;
+	// Read POST body (either JSON from frontend, or form-encoded from ACS/browser-info)
+	let raw = '';
+	req.on('data', chunk => {
+		raw += chunk;
+		if (raw.length > 1e7) req.destroy();
+	});
+	req.on('end', async () => {
+		const contentType = (req.headers['content-type'] || '').toLowerCase();
+		let post = {};
+		try {
+			if (contentType.includes('application/json')) {
+				post = JSON.parse(raw || '{}');
+			} else {
+				post = qs.parse(raw || '');
+			}
+		} catch (e) {
+			return json(res, 400, { error: 'Invalid request body' });
+		}
 
-  if (post.customerName) fields.customerName = post.customerName;
-  if (post.customerEmail) fields.customerEmail = post.customerEmail;
-  if (post.customerAddress) fields.customerAddress = post.customerAddress;
-  if (post.customerPostCode) fields.customerPostCode = post.customerPostCode;
-  if (post.orderRef) fields.orderRef = post.orderRef;
+		// Case A: Browser info collection step posts back (hidden inputs browserInfo[...])
+		if (anyKeyStartsWith(post, 'browserInfo[')) {
+			const pageURL = `https://${req.headers.host}${parsedUrl.pathname}`;
+			const remoteAddress = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+			const cookies = parseCookies(req);
 
-  // If you also send custom fields like cart, you can include them here if your gateway expects them.
+			// If frontend JSON was already posted earlier, it should be in a cookie (short-lived)
+			let payload = {};
+			if (cookies.__payload) {
+				try { payload = JSON.parse(cookies.__payload); } catch {}
+			}
 
-  return fields;
-}
+			const fields = mapFrontendPayloadToGateway(payload, { pageURL, remoteAddress });
+			for ([k, v] of Object.entries(post)) {
+				// Strip "browserInfo[" prefix and trailing "]" to flatten keys
+				const inner = k.substr(12, k.length - 13);
+				fields[inner] = v;
+			}
 
-// Show/continue 3DS by posting to ACS. We pass threeDSRef via a hidden field (NO globals).
-function showFrameForThreeDS(responseFields) {
-  const style = responseFields['threeDSRequest[threeDSMethodData]'] ? ' display: none;' : '';
-  const formField = {};
+			try {
+				const response = await Gateway.directRequest(fields);
+				if (response.responseCode === '65802' && response.threeDSRef) {
+					setCookie(res, 'threeDSRef', response.threeDSRef);
+					return sendHtml(res, htmlUtils.showFrameForThreeDS(response));
+				}
+				if (response.responseCode === '0') {
+					clearCookie(res, 'threeDSRef');
+					return sendHtml(res, '<p>Thank you for your payment.</p>');
+				}
+				return sendHtml(res, `<p>Failed to take payment: message=${response.responseMessage} code=${response.responseCode}</p>`);
+			} catch (err) {
+				return sendHtml(res, `<p>Failed to take payment.</p>`);
+			}
+		}
 
-  for (const [k, v] of Object.entries(responseFields)) {
-    if (k.startsWith('threeDSRequest[')) {
-      const formKey = k.substr(15, k.length - 16);
-      formField[formKey] = v;
-    }
-  }
+		// Case B: Frontend JSON payload initial request
+		if (contentType.includes('application/json')) {
+			// Store payload briefly in a cookie to reuse after browser-info step
+			setCookie(res, '__payload', JSON.stringify(post), { maxAge: 300, httpOnly: true, secure: true, sameSite: 'None' });
+			const body = htmlUtils.collectBrowserInfo(req);
+			return sendHtml(res, body);
+		}
 
-  // Carry continuation ref in the form (so the next POST includes it)
-  if (responseFields['threeDSRef']) {
-    formField['threeDSRef'] = responseFields['threeDSRef'];
-  }
+		// Case C: ACS posts back fields (NOT starting with threeDSResponse[, then build threeDSResponse)
+		if (!anyKeyStartsWith(post, 'threeDSResponse[')) {
+			const cookies = parseCookies(req);
+			const reqFields = {
+				action: 'SALE',
+				merchantID: process.env.GATEWAY_MERCHANT_ID || Gateway.merchantID,
+				merchantPwd: process.env.GATEWAY_MERCHANT_PWD || Gateway.merchantPwd,
+				merchantSecret: process.env.GATEWAY_MERCHANT_SECRET || Gateway.merchantSecret,
+				threeDSRef: cookies.threeDSRef || '',
+				threeDSResponse: ''
+			};
+			for (const [k, v] of Object.entries(post)) {
+				reqFields.threeDSResponse += '[' + k + ']__EQUAL__SIGN__' + v + '&';
+			}
+			reqFields.threeDSResponse = reqFields.threeDSResponse.slice(0, -1);
 
-  return silentPost(responseFields['threeDSURL'], formField, '_self', style);
-}
+			try {
+				const response = await Gateway.directRequest(reqFields);
+				if (response.responseCode === '65802' && response.threeDSRef) setCookie(res, 'threeDSRef', response.threeDSRef);
+				if (response.responseCode === '0') clearCookie(res, 'threeDSRef');
+				if (response.responseCode === '0') return sendHtml(res, '<p>Thank you for your payment.</p>');
+				return sendHtml(res, htmlUtils.showFrameForThreeDS(response));
+			} catch (err) {
+				return sendHtml(res, `<p>Failed to take payment.</p>`);
+			}
+		}
 
-// Simple auto-submitting form
-function silentPost(actionUrl, fields, target = '_self', extraIframeStyle = '') {
-  let inputs = '';
-  for (const [k, v] of Object.entries(fields)) {
-    const safeVal = String(v).replace(/"/g, '&quot;');
-    inputs += `<input type="hidden" name="${k}" value="${safeVal}" />\n`;
-  }
-
-  // If the ACS might render a challenge, you can optionally show an iframe wrapper (optional)
-  const maybeIframe =
-    extraIframeStyle
-      ? `<iframe name="threeds_acs" style="height:420px; width:420px;${extraIframeStyle}"></iframe>\n`
-      : '';
-
-  return `
-    ${maybeIframe}
-    <form id="silentPost" action="${actionUrl}" method="post" target="${target}">
-      ${inputs}
-      <input type="submit" value="Continue" />
-    </form>
-    <script>window.setTimeout(function(){ document.getElementById('silentPost').submit(); }, 0);</script>
-  `;
-}
-
-function processResponseFields(responseFields) {
-  switch (responseFields["responseCode"]) {
-    case "65802":
-      // Challenge/continuation needed
-      return showFrameForThreeDS(responseFields);
-    case "0":
-      return "<p>Thank you for your payment.</p>";
-    default:
-      return `<p>Failed to take payment: message=${responseFields["responseMessage"]} code=${responseFields["responseCode"]}</p>`;
-  }
-}
-
-// ----------------- server -----------------
-
-const server = http.createServer(function (req, res) {
-  const getParams = url.parse(req.url, true).query;
-
-  if (req.method !== 'POST') {
-    // Step 0: return HTML that auto-posts browser info (as in your original flow)
-    const body = htmlUtils.collectBrowserInfo(req);
-    sendResponse(body, res);
-    return;
-  }
-
-  // POST:
-  let body = '';
-
-  req.on('data', function (data) {
-    body += data;
-    if (body.length > 1e6) {
-      try { req.connection.destroy(); } catch (_) {}
-    }
-  });
-
-  req.on('end', function () {
-    let post;
-    // Accept JSON or x-www-form-urlencoded
-    try {
-      post = JSON.parse(body || '{}');
-    } catch (_) {
-      post = qs.parse(body);
-    }
-
-    // Branch A: Initial POST (browser info present) -> send to gateway
-    if (anyKeyStartsWith(post, 'browserInfo[')) {
-      // Build your SALE fields straight from the front-end payload
-      const fields = buildGatewayFields(req, post);
-
-      // Also pass browserInfo[...] into fields (as your original code did)
-      for (const [k, v] of Object.entries(post)) {
-        if (k.startsWith('browserInfo[')) {
-          fields[k.substr(12, k.length - 13)] = v;
-        }
-      }
-
-      gateway.directRequest(fields)
-        .then((response) => {
-          const out = processResponseFields(response);
-          sendResponse(out, res);
-        })
-        .catch((error) => {
-          console.error(error);
-          sendResponse('<p>Payment error.</p>', res);
-        });
-
-      return;
-    }
-
-    // Branch B: Continuation POST from ACS (no threeDSResponse[...] yet) -> include threeDSRef from form
-    if (!anyKeyStartsWith(post, 'threeDSResponse[')) {
-      const reqFields = {
-        action: 'SALE',
-        merchantID: "100856",
-        threeDSRef: post.threeDSRef || '', // <-- carried forward via hidden field
-        threeDSResponse: '',
-      };
-
-      for (const [k, v] of Object.entries(post)) {
-        reqFields.threeDSResponse += '[' + k + ']' + '__EQUAL__SIGN__' + v + '&';
-      }
-      // Remove trailing &
-      if (reqFields.threeDSResponse.endsWith('&')) {
-        reqFields.threeDSResponse = reqFields.threeDSResponse.slice(0, -1);
-      }
-
-      gateway.directRequest(reqFields)
-        .then((response) => {
-          const out = processResponseFields(response);
-          sendResponse(out, res);
-        })
-        .catch((error) => {
-          console.error(error);
-          sendResponse('<p>Payment error.</p>', res);
-        });
-
-      return;
-    }
-
-    // If you have a third branch to catch explicit threeDSResponse[...] arrays, keep it the same as your original
-    // (Your original snippet didn’t show that specific branch’s handling.)
-  });
+		// Fallback
+		return sendHtml(res, '<p>Unexpected request.</p>');
+	});
 });
 
-server.listen(8012, () => {
-  console.log('Server listening on 8012');
+const PORT = process.env.PORT || 8012;
+server.listen(PORT, () => {
+	console.log(`Payment server listening on :${PORT}`);
 });
+
+

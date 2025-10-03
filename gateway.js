@@ -436,7 +436,7 @@ class Gateway {
         let http_accept_language = htmlentities(req.headers['accept-language']);
 
 
-        let form_attrs = 'id="collectBrowserInfo" method="post" action="https://takepayments.ea-dental.com"';
+        let form_attrs = 'id="collectBrowserInfo" method="post" action="?"';
 
         if ('formAttrs' in options) {
             form_attrs += options['formAttrs'];

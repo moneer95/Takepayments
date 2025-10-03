@@ -69,13 +69,15 @@ var server = http.createServer(function(req, res) { //create web server
                 
                 let fields = getInitialFields('https://takepayments.ea-dental.com/', '127.0.0.1', paymentData);
                 
-                // Add browser info fields with proper prefix
+                // Add browser info as nested object
+                const browserInfo = {};
                 for ([k, v] of Object.entries(post)) {
                     if (k.startsWith('browserInfo[')) {
                         const fieldName = k.substr(12, k.length - 13);
-                        fields[`browserInfo[${fieldName}]`] = v;
+                        browserInfo[fieldName] = v;
                     }
                 }
+                fields.browserInfo = browserInfo;
 
                 gateway.directRequest(fields).then((response) => {
                     body = processResponseFields(response, gateway);

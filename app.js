@@ -8,12 +8,38 @@ const htmlUtils = require('./htmlutils.js');
 
 const gateway = require('./gateway.js').Gateway;
 const assert = require('assert');
-// const merchantSecret = 'pass';
+
+// Cookie helper functions
+function parseCookies(req) {
+    const header = req.headers.cookie || '';
+    return header.split(';').reduce((acc, part) => {
+        const [k, v] = part.split('=');
+        if (k && v) acc[k.trim()] = decodeURIComponent(v.trim());
+        return acc;
+    }, {});
+}
+
+function setCookie(res, name, value, { maxAge = 900, path = '/', secure = true, httpOnly = true, sameSite = 'None' } = {}) {
+    const parts = [
+        `${name}=${encodeURIComponent(value)}`,
+        `Max-Age=${maxAge}`,
+        `Path=${path}`,
+        secure ? 'Secure' : '',
+        httpOnly ? 'HttpOnly' : '',
+        sameSite ? `SameSite=${sameSite}` : ''
+    ].filter(Boolean);
+    const existing = res.getHeader('Set-Cookie');
+    const next = existing ? (Array.isArray(existing) ? existing.concat(parts.join('; ')) : [existing, parts.join('; ')]) : parts.join('; ');
+    res.setHeader('Set-Cookie', next);
+}
+
+function clearCookie(res, name) {
+    setCookie(res, name, '', { maxAge: 0 });
+}
 
 var server = http.createServer(function(req, res) { //create web server
     const getParams = url.parse(req.url, true).query;
     let body = '';
-    global.times = 0;
 
     if (req.method != 'POST') {
         // Return a form to collect payment details
@@ -35,7 +61,13 @@ var server = http.createServer(function(req, res) { //create web server
 
             // Collect browser information step - to present to the gateway
             if (anyKeyStartsWith(post, 'browserInfo[')) {
-                let fields = getInitialFields('https://takepayments.ea-dental.com/', '127.0.0.1', global.paymentData);
+                const cookies = parseCookies(req);
+                let paymentData = {};
+                if (cookies.paymentData) {
+                    try { paymentData = JSON.parse(cookies.paymentData); } catch {}
+                }
+                
+                let fields = getInitialFields('https://takepayments.ea-dental.com/', req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1', paymentData);
                 for ([k, v] of Object.entries(post)) {
                     fields[k.substr(12, k.length - 13)] = v;
                 }
@@ -52,15 +84,16 @@ var server = http.createServer(function(req, res) { //create web server
                 // Also catches any continuation challenges and continues to post
                 // until we ultimately receive an auth code
             } else if (post.action === 'collect_payment') {
-                // Store payment data and redirect to browser info collection
-                global.paymentData = post;
+                // Store payment data in cookie and redirect to browser info collection
+                setCookie(res, 'paymentData', JSON.stringify(post), { maxAge: 300, httpOnly: true, secure: true, sameSite: 'None' });
                 body = htmlUtils.collectBrowserInfo(req);
                 sendResponse(body, res);
             } else if (!anyKeyStartsWith(post, 'threeDSResponse[')) {
+                const cookies = parseCookies(req);
                 let reqFields = {
                     action: 'SALE',
-                    merchantID: getInitialFields(null, null).merchantID,
-                    threeDSRef: global.threeDSRef,
+                    merchantID: process.env.GATEWAY_MERCHANT_ID || '278346',
+                    threeDSRef: cookies.threeDSRef || '',
                     threeDSResponse: '',
                 };
 
@@ -74,6 +107,13 @@ var server = http.createServer(function(req, res) { //create web server
                 // Remove the last & for good measure
                 reqFields.threeDSResponse = reqFields.threeDSResponse.substr(0, reqFields.threeDSResponse.length - 1);
                 gateway.directRequest(reqFields).then((response) => {
+                    if (response.responseCode === "65802" && response.threeDSRef) {
+                        setCookie(res, 'threeDSRef', response.threeDSRef);
+                    }
+                    if (response.responseCode === "0") {
+                        clearCookie(res, 'threeDSRef');
+                        clearCookie(res, 'paymentData');
+                    }
                     body = processResponseFields(response, gateway);
                     sendResponse(body, res);
                 }).catch((error) => {
@@ -108,13 +148,11 @@ function anyKeyStartsWith(haystack, needle) {
 function processResponseFields(responseFields, gateway) {
     switch (responseFields["responseCode"]) {
         case "65802":
-            // TODO - Please change this to local session storage
-            global.threeDSRef = responseFields["threeDSRef"];
             return htmlUtils.showFrameForThreeDS(responseFields);
         case "0":
             return "<p>Thank you for your payment.</p>"
         default:
-            return "<p>Failed to take payment: message=" + responseFields["responseMessage"] + " code=" + responseFields["responseCode"] + "</p>" //HTMLEntities.new.encode TODO
+            return "<p>Failed to take payment: message=" + responseFields["responseMessage"] + " code=" + responseFields["responseCode"] + "</p>"
     }
 }
 
@@ -140,39 +178,39 @@ function getPaymentForm() {
             <h2>Payment Details</h2>
             <p>
                 <label>Card Number:</label><br>
-                <input type="text" name="cardNumber" value="4012001037141112" required />
+                <input type="text" name="cardNumber" placeholder="1234567890123456" required />
             </p>
             <p>
                 <label>Expiry Month:</label><br>
-                <input type="text" name="cardExpiryMonth" value="12" required />
+                <input type="text" name="cardExpiryMonth" placeholder="MM" required />
             </p>
             <p>
                 <label>Expiry Year:</label><br>
-                <input type="text" name="cardExpiryYear" value="30" required />
+                <input type="text" name="cardExpiryYear" placeholder="YY" required />
             </p>
             <p>
                 <label>CVV:</label><br>
-                <input type="text" name="cardCVV" value="083" required />
+                <input type="text" name="cardCVV" placeholder="123" required />
             </p>
             <p>
                 <label>Customer Name:</label><br>
-                <input type="text" name="customerName" value="Test Customer" required />
+                <input type="text" name="customerName" placeholder="John Doe" required />
             </p>
             <p>
                 <label>Customer Email:</label><br>
-                <input type="email" name="customerEmail" value="test@testcustomer.com" required />
+                <input type="email" name="customerEmail" placeholder="john@example.com" required />
             </p>
             <p>
                 <label>Customer Address:</label><br>
-                <input type="text" name="customerAddress" value="16 Test Street" required />
+                <input type="text" name="customerAddress" placeholder="123 Main Street" required />
             </p>
             <p>
                 <label>Customer Post Code:</label><br>
-                <input type="text" name="customerPostCode" value="TE15 5ST" required />
+                <input type="text" name="customerPostCode" placeholder="SW1A 1AA" required />
             </p>
             <p>
                 <label>Amount (in pence):</label><br>
-                <input type="number" name="amount" value="1001" required />
+                <input type="number" name="amount" placeholder="1000" required />
             </p>
             <p>
                 <button type="submit">Pay Now</button>
@@ -181,32 +219,34 @@ function getPaymentForm() {
     `;
 }
 
-// This provides data from form or defaults for demonstration purposes only.
+// This provides data from form for production use
 function getInitialFields(pageURL, remoteAddress, paymentData = {}) {
     let uniqid = Math.random().toString(36).substr(2, 10)
 
     return {
-        "merchantID": "278346",
+        "merchantID": process.env.GATEWAY_MERCHANT_ID || "278346",
+        "merchantPwd": process.env.GATEWAY_MERCHANT_PWD || null,
+        "merchantSecret": process.env.GATEWAY_MERCHANT_SECRET || "5CZ4T3pdVLUN011UrKFD",
         "action": "SALE",
         "type": 1,
         "transactionUnique": uniqid,
         "countryCode": 826,
         "currencyCode": 826,
-        "amount": 10,
-        "cardNumber": paymentData.cardNumber || "4012001037141112",
-        "cardExpiryMonth": Number(paymentData.cardExpiryMonth) || 12,
-        "cardExpiryYear": Number(paymentData.cardExpiryYear) || 30,
-        "cardCVV": paymentData.cardCVV || "083",
-        "customerName": paymentData.customerName || "Test Customer",
-        "customerEmail": paymentData.customerEmail || "test@testcustomer.com",
-        "customerAddress": paymentData.customerAddress || "16 Test Street",
-        "customerPostCode": paymentData.customerPostCode || "TE15 5ST",
-        "orderRef": "Test purchase",
+        "amount": Number(paymentData.amount) || 1000,
+        "cardNumber": paymentData.cardNumber || "",
+        "cardExpiryMonth": Number(paymentData.cardExpiryMonth) || 0,
+        "cardExpiryYear": Number(paymentData.cardExpiryYear) || 0,
+        "cardCVV": paymentData.cardCVV || "",
+        "customerName": paymentData.customerName || "",
+        "customerEmail": paymentData.customerEmail || "",
+        "customerAddress": paymentData.customerAddress || "",
+        "customerPostCode": paymentData.customerPostCode || "",
+        "orderRef": "Online Purchase",
 
         // The following fields are mandatory for 3DSv2 direct integration only
         "remoteAddress": remoteAddress,
 
-        "merchantCategoryCode": 5411,
+        "merchantCategoryCode": Number(process.env.GATEWAY_MCC || 5411),
         "threeDSVersion": "2",
         "threeDSRedirectURL": pageURL + "&acs=1"
     }

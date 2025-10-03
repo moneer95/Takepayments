@@ -16,8 +16,8 @@ var server = http.createServer(function(req, res) { //create web server
     global.times = 0;
 
     if (req.method != 'POST') {
-        // Every other request after this is a POST.
-        body = htmlUtils.collectBrowserInfo(req);
+        // Return a form to collect payment details
+        body = getPaymentForm();
         sendResponse(body, res);
     } else {
         body = '';
@@ -35,7 +35,7 @@ var server = http.createServer(function(req, res) { //create web server
 
             // Collect browser information step - to present to the gateway
             if (anyKeyStartsWith(post, 'browserInfo[')) {
-                let fields = getInitialFields('https://takepayments.ea-dental.com/', '127.0.0.1');
+                let fields = getInitialFields('https://takepayments.ea-dental.com/', '127.0.0.1', global.paymentData);
                 for ([k, v] of Object.entries(post)) {
                     fields[k.substr(12, k.length - 13)] = v;
                 }
@@ -51,6 +51,11 @@ var server = http.createServer(function(req, res) { //create web server
                 // threeDSRef previously provided to acknowledge the challenge.
                 // Also catches any continuation challenges and continues to post
                 // until we ultimately receive an auth code
+            } else if (post.action === 'collect_payment') {
+                // Store payment data and redirect to browser info collection
+                global.paymentData = post;
+                body = htmlUtils.collectBrowserInfo(req);
+                sendResponse(body, res);
             } else if (!anyKeyStartsWith(post, 'threeDSResponse[')) {
                 let reqFields = {
                     action: 'SALE',
@@ -127,9 +132,57 @@ function sendResponse(body, res) {
 
 server.listen(8012);
 
-// This provides placeholder data for demonstration purposes only.
-function getInitialFields(pageURL, remoteAddress) {
+// Payment form to collect card details
+function getPaymentForm() {
+    return `
+        <form method="post" action="?">
+            <input type="hidden" name="action" value="collect_payment" />
+            <h2>Payment Details</h2>
+            <p>
+                <label>Card Number:</label><br>
+                <input type="text" name="cardNumber" value="4012001037141112" required />
+            </p>
+            <p>
+                <label>Expiry Month:</label><br>
+                <input type="text" name="cardExpiryMonth" value="12" required />
+            </p>
+            <p>
+                <label>Expiry Year:</label><br>
+                <input type="text" name="cardExpiryYear" value="30" required />
+            </p>
+            <p>
+                <label>CVV:</label><br>
+                <input type="text" name="cardCVV" value="083" required />
+            </p>
+            <p>
+                <label>Customer Name:</label><br>
+                <input type="text" name="customerName" value="Test Customer" required />
+            </p>
+            <p>
+                <label>Customer Email:</label><br>
+                <input type="email" name="customerEmail" value="test@testcustomer.com" required />
+            </p>
+            <p>
+                <label>Customer Address:</label><br>
+                <input type="text" name="customerAddress" value="16 Test Street" required />
+            </p>
+            <p>
+                <label>Customer Post Code:</label><br>
+                <input type="text" name="customerPostCode" value="TE15 5ST" required />
+            </p>
+            <p>
+                <label>Amount (in pence):</label><br>
+                <input type="number" name="amount" value="1001" required />
+            </p>
+            <p>
+                <button type="submit">Pay Now</button>
+            </p>
+        </form>
+    `;
+}
 
+// This provides data from form or defaults for demonstration purposes only.
+function getInitialFields(pageURL, remoteAddress, paymentData = {}) {
     let uniqid = Math.random().toString(36).substr(2, 10)
 
     return {
@@ -139,15 +192,15 @@ function getInitialFields(pageURL, remoteAddress) {
         "transactionUnique": uniqid,
         "countryCode": 826,
         "currencyCode": 826,
-        "amount": 1001,
-        "cardNumber": "4012001037141112",
-        "cardExpiryMonth": 12,
-        "cardExpiryYear": 30,
-        "cardCVV": "083",
-        "customerName": "Test Customer",
-        "customerEmail": "test@testcustomer.com",
-        "customerAddress": "16 Test Street",
-        "customerPostCode": "TE15 5ST",
+        "amount": Number(paymentData.amount) || 1001,
+        "cardNumber": paymentData.cardNumber || "4012001037141112",
+        "cardExpiryMonth": Number(paymentData.cardExpiryMonth) || 12,
+        "cardExpiryYear": Number(paymentData.cardExpiryYear) || 30,
+        "cardCVV": paymentData.cardCVV || "083",
+        "customerName": paymentData.customerName || "Test Customer",
+        "customerEmail": paymentData.customerEmail || "test@testcustomer.com",
+        "customerAddress": paymentData.customerAddress || "16 Test Street",
+        "customerPostCode": paymentData.customerPostCode || "TE15 5ST",
         "orderRef": "Test purchase",
 
         // The following fields are mandatory for 3DSv2 direct integration only

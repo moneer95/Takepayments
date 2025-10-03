@@ -9,6 +9,48 @@ const htmlUtils = require('./htmlutils.js');
 const gateway = require('./gateway.js').Gateway;
 const assert = require('assert');
 
+// Session storage for production (replace with Redis/database in production)
+const sessions = new Map();
+
+// Session management functions
+function generateSessionId() {
+    return crypto.randomBytes(32).toString('hex');
+}
+
+function getSession(req) {
+    const cookies = parseCookies(req);
+    const sessionId = cookies.sessionId;
+    if (!sessionId || !sessions.has(sessionId)) {
+        return null;
+    }
+    return sessions.get(sessionId);
+}
+
+function createSession(res, data = {}) {
+    const sessionId = generateSessionId();
+    sessions.set(sessionId, data);
+    setCookie(res, 'sessionId', sessionId, { maxAge: 900, httpOnly: true, secure: true, sameSite: 'None' });
+    return sessionId;
+}
+
+function updateSession(req, res, data) {
+    const sessionId = getSession(req);
+    if (sessionId) {
+        sessions.set(sessionId, { ...sessions.get(sessionId), ...data });
+    } else {
+        createSession(res, data);
+    }
+}
+
+function clearSession(req, res) {
+    const cookies = parseCookies(req);
+    const sessionId = cookies.sessionId;
+    if (sessionId) {
+        sessions.delete(sessionId);
+        clearCookie(res, 'sessionId');
+    }
+}
+
 // Cookie helper functions
 function parseCookies(req) {
     const header = req.headers.cookie || '';
@@ -61,29 +103,25 @@ var server = http.createServer(function(req, res) { //create web server
 
             // Collect browser information step - to present to the gateway
             if (anyKeyStartsWith(post, 'browserInfo[')) {
-                const cookies = parseCookies(req);
-                let paymentData = {};
-                if (cookies.paymentData) {
-                    try { paymentData = JSON.parse(cookies.paymentData); } catch {}
+                const session = getSession(req);
+                if (!session || !session.paymentData) {
+                    return sendResponse('<p>Session expired. Please try again.</p>', res);
                 }
                 
-                let fields = getInitialFields('https://takepayments.ea-dental.com/', '127.0.0.1', paymentData);
-                
-                // Add browser info as nested object
-                const browserInfo = {};
+                let fields = getInitialFields('https://takepayments.ea-dental.com/', req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1', session.paymentData);
                 for ([k, v] of Object.entries(post)) {
-                    if (k.startsWith('browserInfo[')) {
-                        const fieldName = k.substr(12, k.length - 13);
-                        browserInfo[fieldName] = v;
-                    }
+                    fields[k.substr(12, k.length - 13)] = v;
                 }
-                fields.browserInfo = browserInfo;
 
                 gateway.directRequest(fields).then((response) => {
-                    body = processResponseFields(response, gateway);
+                    if (response.responseCode === "0") {
+                        clearSession(req, res);
+                    }
+                    body = processResponseFields(response, gateway, req, res);
                     sendResponse(body, res);
                 }).catch((error) => {
                     console.error(error);
+                    sendResponse('<p>Payment processing error. Please try again.</p>', res);
                 });
                 // Gateway responds with result from ACS - potentially featuring a
                 // challenge. Extract the method data, and pass back complete with
@@ -91,41 +129,20 @@ var server = http.createServer(function(req, res) { //create web server
                 // Also catches any continuation challenges and continues to post
                 // until we ultimately receive an auth code
             } else if (post.action === 'collect_payment') {
-                // Create complete gateway fields and store in cookie
-                let uniqid = Math.random().toString(36).substr(2, 10);
-                const completePaymentData = {
-                    // Form data
-                    cardNumber: post.cardNumber,
-                    cardExpiryMonth: post.cardExpiryMonth,
-                    cardExpiryYear: post.cardExpiryYear,
-                    cardCVV: post.cardCVV,
-                    customerName: post.customerName,
-                    customerEmail: post.customerEmail,
-                    customerAddress: post.customerAddress,
-                    customerPostCode: post.customerPostCode,
-                    amount: post.amount,
-                    
-                    // Gateway configuration
-                    merchantID: process.env.GATEWAY_MERCHANT_ID || "278346",
-                    action: "SALE",
-                    type: 1,
-                    transactionUnique: uniqid,
-                    countryCode: 826,
-                    currencyCode: 826,
-                    merchantCategoryCode: Number(process.env.GATEWAY_MCC || 5411),
-                    threeDSVersion: "2",
-                    orderRef: "Online Purchase"
-                };
-                
-                setCookie(res, 'paymentData', JSON.stringify(completePaymentData), { maxAge: 300, httpOnly: true, secure: true, sameSite: 'None' });
+                // Store payment data in session and redirect to browser info collection
+                updateSession(req, res, { paymentData: post });
                 body = htmlUtils.collectBrowserInfo(req);
                 sendResponse(body, res);
             } else if (!anyKeyStartsWith(post, 'threeDSResponse[')) {
-                const cookies = parseCookies(req);
+                const session = getSession(req);
+                if (!session || !session.threeDSRef) {
+                    return sendResponse('<p>Session expired. Please try again.</p>', res);
+                }
+                
                 let reqFields = {
                     action: 'SALE',
                     merchantID: process.env.GATEWAY_MERCHANT_ID || '278346',
-                    threeDSRef: cookies.threeDSRef || '',
+                    threeDSRef: session.threeDSRef,
                     threeDSResponse: '',
                 };
 
@@ -139,17 +156,14 @@ var server = http.createServer(function(req, res) { //create web server
                 // Remove the last & for good measure
                 reqFields.threeDSResponse = reqFields.threeDSResponse.substr(0, reqFields.threeDSResponse.length - 1);
                 gateway.directRequest(reqFields).then((response) => {
-                    if (response.responseCode === "65802" && response.threeDSRef) {
-                        setCookie(res, 'threeDSRef', response.threeDSRef);
-                    }
                     if (response.responseCode === "0") {
-                        clearCookie(res, 'threeDSRef');
-                        clearCookie(res, 'paymentData');
+                        clearSession(req, res);
                     }
-                    body = processResponseFields(response, gateway);
+                    body = processResponseFields(response, gateway, req, res);
                     sendResponse(body, res);
                 }).catch((error) => {
                     console.error(error);
+                    sendResponse('<p>Payment processing error. Please try again.</p>', res);
                 });
             }
         });
@@ -177,9 +191,11 @@ function anyKeyStartsWith(haystack, needle) {
 	Helper function to monitor and act upon differing
 	gateway responses
 */
-function processResponseFields(responseFields, gateway) {
+function processResponseFields(responseFields, gateway, req, res) {
     switch (responseFields["responseCode"]) {
         case "65802":
+            // Store threeDSRef in session
+            updateSession(req, res, { threeDSRef: responseFields["threeDSRef"] });
             return htmlUtils.showFrameForThreeDS(responseFields);
         case "0":
             return "<p>Thank you for your payment.</p>"
@@ -251,15 +267,18 @@ function getPaymentForm() {
     `;
 }
 
-// This provides data from cookie for production use
+// This provides data from form for production use
 function getInitialFields(pageURL, remoteAddress, paymentData = {}) {
+    let uniqid = Math.random().toString(36).substr(2, 10)
+
     return {
-        "merchantID": paymentData.merchantID || process.env.GATEWAY_MERCHANT_ID || "278346",
-        "action": paymentData.action || "SALE",
-        "type": paymentData.type || 1,
-        "transactionUnique": paymentData.transactionUnique || Math.random().toString(36).substr(2, 10),
-        "countryCode": paymentData.countryCode || 826,
-        "currencyCode": paymentData.currencyCode || 826,
+        "merchantID": process.env.GATEWAY_MERCHANT_ID || "278346",
+        "merchantSecret": process.env.GATEWAY_MERCHANT_SECRET || "5CZ4T3pdVLUN011UrKFD",
+        "action": "SALE",
+        "type": 1,
+        "transactionUnique": uniqid,
+        "countryCode": 826,
+        "currencyCode": 826,
         "amount": Number(paymentData.amount) || 1000,
         "cardNumber": paymentData.cardNumber || "",
         "cardExpiryMonth": Number(paymentData.cardExpiryMonth) || 0,
@@ -269,13 +288,13 @@ function getInitialFields(pageURL, remoteAddress, paymentData = {}) {
         "customerEmail": paymentData.customerEmail || "",
         "customerAddress": paymentData.customerAddress || "",
         "customerPostCode": paymentData.customerPostCode || "",
-        "orderRef": paymentData.orderRef || "Online Purchase",
+        "orderRef": "Online Purchase",
 
         // The following fields are mandatory for 3DSv2 direct integration only
         "remoteAddress": remoteAddress,
 
-        "merchantCategoryCode": paymentData.merchantCategoryCode || Number(process.env.GATEWAY_MCC || 5411),
-        "threeDSVersion": paymentData.threeDSVersion || "2",
+        "merchantCategoryCode": Number(process.env.GATEWAY_MCC || 5411),
+        "threeDSVersion": "2",
         "threeDSRedirectURL": pageURL + "&acs=1"
     }
 }

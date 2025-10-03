@@ -85,27 +85,30 @@ exports.collectBrowserInfo = function(req) {
 	  // Send a request to the ACS server by POSTing a form with the target set as the IFrame.
 	  // The form is hidden for threeDSMethodData requests (frictionless) and visible when the ACS
 	  // server may show a challenge to the user.
-	  style = responseFields['threeDSRequest[threeDSMethodData]'] ? ' display: none;' : '';
-	  rtn = '<iframe name="threeds_acs" style="height:420px; width:420px;"' + style + '"></iframe>\n\n';
+	  const style = responseFields['threeDSRequest[threeDSMethodData]'] ? ' display: none;' : '';
+	  let rtn = '<iframe name="threeds_acs" style="height:420px; width:420px;"' + style + '"></iframe>\n\n';
   
 	  // We could extract each key by name, however in the interests of facilitating forward
 	  // compatibility, we pass through every field in the threeDSRequest array.
-	  formField = {};
+	  let formField = {};
 	  for ([k, v] of Object.entries(responseFields)) {
 		  if (k.startsWith('threeDSRequest[')) {
 			  let formKey = k.substr(15, k.length - 16);
 			  formField[formKey] = v;
 		  }
+	  }
   
-		  formField['threeDSRef'] = global.threeDSRef;
+	  // Use the value from responseFields (it's present with 65802)
+	  if (responseFields['threeDSRef']) {
+		  formField['threeDSRef'] = responseFields['threeDSRef'];
 	  }
   
 	  return silentPost(responseFields['threeDSURL'], formField, '_self');
   }
   
   // TODO copied from the other one!
-  silentPost = function(url, fields, target = '_self') {
-	  fieldsStr = ""
+  function silentPost(url, fields, target = '_self') {
+	  let fieldsStr = ""
 	  for ([k, v] of Object.entries(fields)) {
 		  fieldsStr += `<input type="text" name="${k}" value="${v}" /> \n`;
 	  }

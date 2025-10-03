@@ -98,8 +98,34 @@ const server = http.createServer(async (req, res) => {
 		return res.end('Not Found');
 	}
 
-	// Step 1: On GET (or first visit), return browser info collector form
-	if (method !== 'POST') {
+	// Step 1: On GET, return browser info collector form with embedded payload
+	if (method === 'GET') {
+		// Get payload from query params or return form to collect it
+		const payload = parsedUrl.query.payload ? JSON.parse(decodeURIComponent(parsedUrl.query.payload)) : {};
+		
+		// If no payload, return a form to collect it
+		if (!payload.cart || payload.cart.length === 0) {
+			const collectPayloadHtml = `
+				<form id="collectPayload" method="post" action="?">
+					<input type="hidden" name="action" value="collect_payload" />
+					<p>Please provide payment details...</p>
+					<input type="text" name="cardNumber" placeholder="Card Number" required />
+					<input type="text" name="cardExpiryMonth" placeholder="MM" required />
+					<input type="text" name="cardExpiryYear" placeholder="YY" required />
+					<input type="text" name="cardCVV" placeholder="CVV" required />
+					<input type="text" name="customerName" placeholder="Name" required />
+					<input type="email" name="customerEmail" placeholder="Email" required />
+					<input type="text" name="customerAddress" placeholder="Address" required />
+					<input type="text" name="customerPostCode" placeholder="Post Code" required />
+					<input type="hidden" name="cart" value='[]' />
+					<button type="submit">Continue to Payment</button>
+				</form>
+			`;
+			return sendHtml(res, collectPayloadHtml);
+		}
+		
+		// Store payload in cookie and return browser info form
+		setCookie(res, '__payload', JSON.stringify(payload), { maxAge: 300, httpOnly: true, secure: true, sameSite: 'None' });
 		const body = htmlUtils.collectBrowserInfo(req);
 		return sendHtml(res, body);
 	}
@@ -162,6 +188,7 @@ const server = http.createServer(async (req, res) => {
 		if (contentType.includes('application/json')) {
 			// Store payload briefly in a cookie to reuse after browser-info step
 			setCookie(res, '__payload', JSON.stringify(post), { maxAge: 300, httpOnly: true, secure: true, sameSite: 'None' });
+			// Return browser info collection form directly
 			const body = htmlUtils.collectBrowserInfo(req);
 			return sendHtml(res, body);
 		}

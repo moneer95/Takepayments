@@ -186,13 +186,13 @@ function getInitialFields(pageURL, remoteAddress, paymentData = {}) {
     let uniqid = Math.random().toString(36).substr(2, 10)
 
     return {
-        "merchantID": "119837",
+        "merchantID": "278346",
         "action": "SALE",
         "type": 1,
         "transactionUnique": uniqid,
         "countryCode": 826,
         "currencyCode": 826,
-        "amount": Number(paymentData.amount) || 1001,
+        "amount": 10,
         "cardNumber": paymentData.cardNumber || "4012001037141112",
         "cardExpiryMonth": Number(paymentData.cardExpiryMonth) || 12,
         "cardExpiryYear": Number(paymentData.cardExpiryYear) || 30,

@@ -68,8 +68,13 @@ var server = http.createServer(function(req, res) { //create web server
                 }
                 
                 let fields = getInitialFields('https://takepayments.ea-dental.com/', '127.0.0.1', paymentData);
+                
+                // Add browser info fields with proper prefix
                 for ([k, v] of Object.entries(post)) {
-                    fields[k.substr(12, k.length - 13)] = v;
+                    if (k.startsWith('browserInfo[')) {
+                        const fieldName = k.substr(12, k.length - 13);
+                        fields[`browserInfo[${fieldName}]`] = v;
+                    }
                 }
 
                 gateway.directRequest(fields).then((response) => {

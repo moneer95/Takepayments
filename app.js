@@ -20,6 +20,7 @@ function generateSessionId() {
 function getSession(req) {
     const cookies = parseCookies(req);
     const sessionId = cookies.sessionId;
+    console.log('Getting session for ID:', sessionId, 'Available sessions:', Array.from(sessions.keys()));
     if (!sessionId || !sessions.has(sessionId)) {
         return null;
     }
@@ -29,13 +30,15 @@ function getSession(req) {
 function createSession(res, data = {}) {
     const sessionId = generateSessionId();
     sessions.set(sessionId, data);
+    console.log('Created session:', sessionId, 'with data:', data);
     setCookie(res, 'sessionId', sessionId, { maxAge: 900, httpOnly: true, secure: true, sameSite: 'None' });
     return sessionId;
 }
 
 function updateSession(req, res, data) {
-    const sessionId = getSession(req);
-    if (sessionId) {
+    const cookies = parseCookies(req);
+    const sessionId = cookies.sessionId;
+    if (sessionId && sessions.has(sessionId)) {
         sessions.set(sessionId, { ...sessions.get(sessionId), ...data });
     } else {
         createSession(res, data);
@@ -104,7 +107,9 @@ var server = http.createServer(function(req, res) { //create web server
             // Collect browser information step - to present to the gateway
             if (anyKeyStartsWith(post, 'browserInfo[')) {
                 const session = getSession(req);
+                console.log('Browser info session:', session);
                 if (!session || !session.paymentData) {
+                    console.log('Session expired or no payment data');
                     return sendResponse('<p>Session expired. Please try again.</p>', res);
                 }
                 
@@ -130,6 +135,7 @@ var server = http.createServer(function(req, res) { //create web server
                 // until we ultimately receive an auth code
             } else if (post.action === 'collect_payment') {
                 // Store payment data in session and redirect to browser info collection
+                console.log('Storing payment data:', post);
                 updateSession(req, res, { paymentData: post });
                 body = htmlUtils.collectBrowserInfo(req);
                 sendResponse(body, res);

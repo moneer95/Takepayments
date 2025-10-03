@@ -67,7 +67,7 @@ var server = http.createServer(function(req, res) { //create web server
                     try { paymentData = JSON.parse(cookies.paymentData); } catch {}
                 }
                 
-                let fields = getInitialFields('https://takepayments.ea-dental.com/', req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1', paymentData);
+                let fields = getInitialFields('https://takepayments.ea-dental.com/', '127.0.0.1', paymentData);
                 for ([k, v] of Object.entries(post)) {
                     fields[k.substr(12, k.length - 13)] = v;
                 }

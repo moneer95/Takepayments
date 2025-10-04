@@ -47,3 +47,7 @@ async function parseCartItems(req){
       }
     
 }
+
+module.exports={
+    parseCartItems
+}

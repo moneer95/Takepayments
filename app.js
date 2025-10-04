@@ -229,7 +229,7 @@ function sendResponse(body, res) {
 server.listen(8012);
 
 // Payment form to collect card details
-function getPaymentForm(cartItems) {
+function getPaymentForm() {
   return `
         <form method="post" action="?">
             <input type="hidden" name="action" value="collect_payment" />

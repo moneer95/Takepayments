@@ -2,6 +2,7 @@ const qs = require('querystring');
 
 
 async function parseCartItems(req) {
+    console.log("parseCartItems caleddd---")
     return new Promise((resolve) => {
         if (req.method !== 'POST') return resolve(undefined);
 

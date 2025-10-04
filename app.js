@@ -87,8 +87,6 @@ var server = http.createServer(async function (req, res) { //create web server
   let cartItems = await parseCartItems(req)
 
 
-  console.log("afterrr",cartItems?.length)
-  console.log("afterrr",typeof(cartItems))
 
   if (cartItems?.length) {
     // Return a form to collect payment details
@@ -97,18 +95,20 @@ var server = http.createServer(async function (req, res) { //create web server
     sendResponse(body, res);
   } else {
     body = '';
-
+    console.log('1')
     req.on('data', function (data) {
       body += data;
-
+      
       // Too much POST data,
       if (body.length > 1e6)
         request.connection.destroy();
     });
 
+    console.log('2')
+    
     req.on('end', function () {
       var post = qs.parse(body);
-
+      
       // Collect browser information step - to present to the gateway
       if (anyKeyStartsWith(post, 'browserInfo[')) {
         const session = getSession(req);
@@ -117,12 +117,12 @@ var server = http.createServer(async function (req, res) { //create web server
           console.log('Session expired or no payment data');
           return sendResponse('<p>Session expired. Please try again.</p>', res);
         }
-
+        
         let fields = getInitialFields('https://takepayments.ea-dental.com/', '127.0.0.1', session.paymentData);
         for ([k, v] of Object.entries(post)) {
           fields[k.substr(12, k.length - 13)] = v;
         }
-
+        
         gateway.directRequest(fields).then((response) => {
           if (response.responseCode === "0") {
             clearSession(req, res);
@@ -133,6 +133,7 @@ var server = http.createServer(async function (req, res) { //create web server
           console.error(error);
           sendResponse('<p>Payment processing error. Please try again.</p>', res);
         });
+        console.log('3')
         // Gateway responds with result from ACS - potentially featuring a
         // challenge. Extract the method data, and pass back complete with
         // threeDSRef previously provided to acknowledge the challenge.

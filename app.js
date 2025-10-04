@@ -83,22 +83,24 @@ function clearCookie(res, name) {
   setCookie(res, name, '', { maxAge: 0 });
 }
 
-var server = http.createServer(async function (req, res) { //create web server
+ var server = http.createServer(async function (req, res) { //create web server
 
 
-  let cartItems = undefined
+   let cartItems = undefined
 
-  if(req.headers.origin == "http://localhost:3000"){
-    cartItems = await parseCartItems(req)
-  }
+   if(req.headers.origin == "http://localhost:3000"){
+     cartItems = await parseCartItems(req)
+   }
 
-
-  if (cartItems?.length) {
-    // Return a form to collect payment details
-    console.log("booodddyyyyy")
-    body = getPaymentForm();
-    sendResponse(body, res);
-  } else {
+   // If we have cart items, store them in session and proceed
+   if (cartItems?.length) {
+     console.log('Storing cart items in session:', cartItems);
+     updateSession(req, res, { cartItems: cartItems });
+     
+     // Return a form to collect payment details
+     body = getPaymentForm();
+     sendResponse(body, res);
+   } else {
     body = '';
     console.log('1')
     req.on('data', function (data) {
@@ -123,7 +125,7 @@ var server = http.createServer(async function (req, res) { //create web server
           return sendResponse('<p>Session expired. Please try again.</p>', res);
         }
 
-        let fields = getInitialFields('https://takepayments.ea-dental.com/', '127.0.0.1', session.paymentData);
+         let fields = getInitialFields('https://takepayments.ea-dental.com/', '127.0.0.1', session.paymentData, session.cartItems);
         for ([k, v] of Object.entries(post)) {
           fields[k.substr(12, k.length - 13)] = v;
         }
@@ -273,10 +275,7 @@ function getPaymentForm() {
                 <label>Customer Post Code:</label><br>
                 <input type="text" name="customerPostCode" placeholder="SW1A 1AA" required />
             </p>
-            <p>
-                <label>Amount (in pence):</label><br>
-                <input type="number" name="amount" placeholder="1000" required />
-            </p>
+            <!-- Amount will be calculated from cart items -->
             <p>
                 <button type="submit">Pay Now</button>
             </p>
@@ -285,8 +284,20 @@ function getPaymentForm() {
 }
 
 // This provides data from form for production use
-function getInitialFields(pageURL, remoteAddress, paymentData = {}) {
+function getInitialFields(pageURL, remoteAddress, paymentData = {}, cartItems = []) {
   let uniqid = Math.random().toString(36).substr(2, 10)
+
+  // Calculate amount from cart items if available, otherwise use paymentData amount
+  let totalAmount = 1000; // default
+  if (cartItems && cartItems.length > 0) {
+    totalAmount = cartItems.reduce((sum, item) => {
+      const price = Number(item.price || 0);
+      const quantity = Number(item.quantity || 1);
+      return sum + (price * quantity);
+    }, 0);
+  } else if (paymentData.amount) {
+    totalAmount = Number(paymentData.amount);
+  }
 
   return {
     "merchantID": process.env.GATEWAY_MERCHANT_ID || "278346",
@@ -296,7 +307,7 @@ function getInitialFields(pageURL, remoteAddress, paymentData = {}) {
     "transactionUnique": uniqid,
     "countryCode": 826,
     "currencyCode": 826,
-    "amount": Number(paymentData.amount) || 1000,
+    "amount": Math.round(totalAmount * 100), // Convert to pence
     "cardNumber": paymentData.cardNumber || "",
     "cardExpiryMonth": Number(paymentData.cardExpiryMonth) || 0,
     "cardExpiryYear": Number(paymentData.cardExpiryYear) || 0,

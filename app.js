@@ -87,8 +87,7 @@ var server = http.createServer(function(req, res) { //create web server
     let body = '';
 
     if (req.method != 'POST') {
-      const url = new URL("https://takepayments.ea-dental.com" + req.url)
-      console.log(url.searchParams.get('items'))
+      console.log("callllllllllleeeeeeeeeeeeeeddddd--------------------")
         // Return a form to collect payment details
         body = getPaymentForm();
         sendResponse(body, res);

@@ -84,6 +84,10 @@ function clearCookie(res, name) {
 }
 
 var server = http.createServer(async function (req, res) { //create web server
+
+
+  console.log(req)
+
   let cartItems = await parseCartItems(req)
 
 

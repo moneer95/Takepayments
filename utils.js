@@ -4,7 +4,7 @@ const qs = require('querystring');
 async function parseCartItems(req) {
     console.log("parseCartItems caleddd---")
     return new Promise((resolve) => {
-        if (req.method !== 'PUT') return resolve(undefined);
+        if (req.method !== 'POST') return resolve(undefined);
 
         let body = '';
         req.on('data', chunk => { body += chunk.toString(); });

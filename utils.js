@@ -1,4 +1,4 @@
-async function parseCartItems(){
+async function parseCartItems(req){
     try {
         if (req.method === 'POST') {
           let body = '';

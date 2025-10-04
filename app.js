@@ -87,40 +87,29 @@ var server = http.createServer(function(req, res) { //create web server
     let body = '';
 
 
-    if (req.method == 'POST') {
-
+    if (req.method === 'POST') {
       let body = '';
-
-      // collect chunks
+  
       req.on('data', chunk => {
         body += chunk.toString();
       });
   
-      // finished receiving
       req.on('end', () => {
+        console.log("Request body:", body);
+        // if JSON, you can also do:
         try {
-          const data = JSON.parse(body); // parse JSON body
-  
-          if (data.items) {
-            console.log("✅ Items received:", data.items);
-  
-            console.log(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ ok: true, items: data.items }));
-          } else {
-            console.log(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: "No items found in request body" }));
-          }
-        } catch (err) {
-          console.log(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: "Invalid JSON" }));
+          const data = JSON.parse(body);
+          console.log("Parsed:", data);
+        } catch (e) {
+          console.log("Not JSON:", body);
         }
-      });
   
-
-      // Return a form to collect payment details
-        body = getPaymentForm();
-        sendResponse(body, res);
-    } else {
+        // send a bare response so client doesn't hang
+        res.writeHead(200);
+        res.end();
+      });
+    }
+      else {
         body = '';
 
         req.on('data', function(data) {

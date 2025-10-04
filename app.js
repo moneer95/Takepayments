@@ -109,7 +109,7 @@ var server = http.createServer(function(req, res) { //create web server
             }
           } else if (ct.includes('application/x-www-form-urlencoded')) {
             // handle form
-            const parsed = querystring.parse(body);
+            const parsed = qs.parse(body);
             console.log("Parsed form:", parsed);
     
             // if your form had <input name="items" value='[{"id":"..."}]'>

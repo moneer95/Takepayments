@@ -86,10 +86,11 @@ function clearCookie(res, name) {
 var server = http.createServer(async function (req, res) { //create web server
 
 
-  console.log(req.headers.origin)
+  let cartItems = undefined
 
-  let cartItems = await parseCartItems(req)
-
+  if(req.headers.origin == "http://localhost:3000"){
+    cartItems = await parseCartItems(req)
+  }
 
 
   if (cartItems?.length) {

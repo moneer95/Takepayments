@@ -116,6 +116,7 @@ var server = http.createServer(function (req, res) { //create web server
           if (parsed.items) {
             try {
               const items = JSON.parse(parsed.items);
+              cartItems = items
               console.log("Decoded items array:", items);
             } catch (err) {
               console.error("items not valid JSON:", parsed.items);

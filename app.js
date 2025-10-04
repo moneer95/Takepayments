@@ -95,7 +95,7 @@ var server = http.createServer(function (req, res) { //create web server
       console.log("Request body:", body);
       // if JSON, you can also do:
       try {
-        cartItems = JSON.parse(body);
+        cartItems = JSON.parse(body.items);
         console.log("Parsed:", cartItems);
       } catch (e) {
         console.log("Not JSON:", body);

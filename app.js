@@ -87,7 +87,8 @@ var server = http.createServer(function(req, res) { //create web server
     let body = '';
 
     if (req.method != 'POST') {
-      console.log(req)
+      const url = new URL(req.url)
+      console.log(url.searchParams.get('items'))
         // Return a form to collect payment details
         body = getPaymentForm();
         sendResponse(body, res);

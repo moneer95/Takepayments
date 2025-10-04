@@ -87,7 +87,8 @@ var server = http.createServer(async function (req, res) { //create web server
   let cartItems = await parseCartItems(req)
 
 
-  console.log("afterrr",cartItems)
+  console.log("afterrr",cartItems?.length)
+  console.log("afterrr",typeof(cartItems))
 
   if (cartItems?.length) {
     // Return a form to collect payment details

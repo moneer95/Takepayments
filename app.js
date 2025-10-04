@@ -83,23 +83,22 @@ function clearCookie(res, name) {
 }
 
 var server = http.createServer(function(req, res) { //create web server
-    const getParams = url.parse(req.url, true).query;
     let body = '';
+    const cartItems = undefined
 
     try{
       if (req.method === 'POST') {
-        let body = '';
     
         req.on('data', chunk => {
           body += chunk.toString();
         });
     
         req.on('end', () => {
-          console.log("Request body:", body);
+          console.log("Request body:", typeof(body));
           // if JSON, you can also do:
           try {
-            const data = JSON.parse(body);
-            console.log("Parsed:", data);
+            cartItems = JSON.parse(body);
+            console.log("Parsed:", cartItems);
           } catch (e) {
             console.log("Not JSON:", body);
           }
@@ -110,9 +109,8 @@ var server = http.createServer(function(req, res) { //create web server
       console.log("not POST")
     }
 
-    if (req.method != 'POST') {
+    if (cartItems) {
       const url = new URL("https://takepayments.ea-dental.com" + req.url)
-      const cartItems = url.searchParams.get('items')
         // Return a form to collect payment details
         body = getPaymentForm();
         sendResponse(body, res);

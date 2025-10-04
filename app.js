@@ -89,7 +89,7 @@ var server = http.createServer(async function (req, res) { //create web server
 
   console.log("afterrr",cartItems)
 
-  if (cartItems) {
+  if (cartItems?.length) {
     // Return a form to collect payment details
     console.log("booodddyyyyy")
     body = getPaymentForm();

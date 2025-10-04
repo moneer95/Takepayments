@@ -104,14 +104,14 @@ var server = http.createServer(function(req, res) { //create web server
           if (data.items) {
             console.log("✅ Items received:", data.items);
   
-            res.writeHead(200, { 'Content-Type': 'application/json' });
+            console.log(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok: true, items: data.items }));
           } else {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
+            console.log(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: "No items found in request body" }));
           }
         } catch (err) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
+          console.log(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: "Invalid JSON" }));
         }
       });

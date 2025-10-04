@@ -92,7 +92,7 @@ var server = http.createServer(function (req, res) { //create web server
     });
 
     req.on('end', () => {
-      console.log("Request body:", typeof (body));
+      console.log("Request body:", body);
       // if JSON, you can also do:
       try {
         cartItems = JSON.parse(body);

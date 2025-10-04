@@ -1,6 +1,6 @@
 const http = require('http'); // Import Node.js core module
 const qs = require('querystring');
-const {parseCartItems} = require('./utils')
+const { parseCartItems } = require('./utils')
 
 const crypto = require('crypto');
 const httpBuildQuery = require('http-build-query');
@@ -98,17 +98,17 @@ var server = http.createServer(async function (req, res) { //create web server
     console.log('1')
     req.on('data', function (data) {
       body += data;
-      
+
       // Too much POST data,
       if (body.length > 1e6)
         request.connection.destroy();
     });
 
     console.log('2')
-    
+
     req.on('end', function () {
       var post = qs.parse(body);
-      
+
       // Collect browser information step - to present to the gateway
       if (anyKeyStartsWith(post, 'browserInfo[')) {
         const session = getSession(req);
@@ -117,12 +117,12 @@ var server = http.createServer(async function (req, res) { //create web server
           console.log('Session expired or no payment data');
           return sendResponse('<p>Session expired. Please try again.</p>', res);
         }
-        
+
         let fields = getInitialFields('https://takepayments.ea-dental.com/', '127.0.0.1', session.paymentData);
         for ([k, v] of Object.entries(post)) {
           fields[k.substr(12, k.length - 13)] = v;
         }
-        
+
         gateway.directRequest(fields).then((response) => {
           if (response.responseCode === "0") {
             clearSession(req, res);

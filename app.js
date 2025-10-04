@@ -86,12 +86,38 @@ var server = http.createServer(function(req, res) { //create web server
     const getParams = url.parse(req.url, true).query;
     let body = '';
 
-    console.log(req)
 
-    if (req.method != 'POST') {
-      const url = new URL("https://takepayments.ea-dental.com" + req.url)
-      const cartItems = url.searchParams.get('items')
-        // Return a form to collect payment details
+    if (req.method == 'POST') {
+
+      let body = '';
+
+      // collect chunks
+      req.on('data', chunk => {
+        body += chunk.toString();
+      });
+  
+      // finished receiving
+      req.on('end', () => {
+        try {
+          const data = JSON.parse(body); // parse JSON body
+  
+          if (data.items) {
+            console.log("✅ Items received:", data.items);
+  
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, items: data.items }));
+          } else {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: "No items found in request body" }));
+          }
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: "Invalid JSON" }));
+        }
+      });
+  
+
+      // Return a form to collect payment details
         body = getPaymentForm();
         sendResponse(body, res);
     } else {

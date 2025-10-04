@@ -1,56 +1,69 @@
 const qs = require('querystring');
 
 
-async function parseCartItems(req){
-    try {
-        if (req.method === 'POST') {
-          let body = '';
-    
-          req.on('data', chunk => {
-            body += chunk.toString();
-          });
-    
-          req.on('end', () => {
-            console.log("Raw body:", body);
-    
-            // detect content type
-            const ct = req.headers['content-type'] || '';
-    
-            if (ct.includes('application/json')) {
-              // handle JSON
-              try {
-                const data = JSON.parse(body);
-                console.log("Parsed JSON:", data);
-              } catch (err) {
-                console.error("Bad JSON:", err.message);
-              }
-            } else if (ct.includes('application/x-www-form-urlencoded')) {
-              // handle form
-              const parsed = qs.parse(body);
-              console.log("Parsed form:", parsed);
-    
-              // if your form had <input name="items" value='[{"id":"..."}]'>
-              if (parsed.items) {
-                try {
-                  const items = JSON.parse(parsed.items);
-                  console.log("Decoded items array:", items);
-                  return items
-                } catch (err) {
-                  console.error("items not valid JSON:", parsed.items);
-                  return undefined
+async function parseCartItems(req) {
+    return new Promise((resolve) => {
+        if (req.method !== 'POST') return resolve(undefined);
+
+        let body = '';
+        req.on('data', chunk => { body += chunk.toString(); });
+
+        req.once('end', () => {
+            console.log('Raw body:', body);
+            const ct = (req.headers['content-type'] || '').toLowerCase();
+
+            try {
+                // JSON: axios.post(..., { items }) or fetch with JSON body
+                if (ct.includes('application/json')) {
+                    const data = JSON.parse(body || '{}');
+                    // return items if present, else the whole object
+                    return resolve(data.items ?? data);
                 }
-              }
+
+                // Form-URL-Encoded: HTML <form method="post">
+                if (ct.includes('application/x-www-form-urlencoded')) {
+                    const parsed = qs.parse(body);
+                    console.log('Parsed form:', parsed);
+
+                    if (parsed.items) {
+                        // items sent as a JSON string in a hidden field
+                        try {
+                            const items = JSON.parse(parsed.items);
+                            console.log('Decoded items array:', items);
+                            return resolve(items);
+                        } catch {
+                            // not JSON, just return the raw string
+                            return resolve(parsed.items);
+                        }
+                    }
+
+                    // Support repeated inputs: items[]=a&items[]=b
+                    if (parsed['items[]']) {
+                        const arr = Array.isArray(parsed['items[]'])
+                            ? parsed['items[]']
+                            : [parsed['items[]']];
+                        return resolve(arr);
+                    }
+
+                    // Nothing specific; return whole parsed object
+                    return resolve(parsed);
+                }
+
+                // Unknown content type
+                return resolve(undefined);
+            } catch (err) {
+                console.error('Parse error:', err.message);
+                return resolve(undefined);
             }
-          });
-        }
-      }
-      catch {
-        console.log("not POST")
-        return undefined
-      }
-    
+        });
+
+        req.once('error', (err) => {
+            console.error('Request error:', err.message);
+            resolve(undefined);
+        });
+    });
 }
 
-module.exports={
+module.exports = {
     parseCartItems
 }

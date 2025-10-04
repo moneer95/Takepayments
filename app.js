@@ -1,5 +1,6 @@
 const http = require('http'); // Import Node.js core module
 const qs = require('querystring');
+const {parseCartItems} = require('./utils')
 
 const crypto = require('crypto');
 const httpBuildQuery = require('http-build-query');
@@ -82,53 +83,9 @@ function clearCookie(res, name) {
   setCookie(res, name, '', { maxAge: 0 });
 }
 
-var server = http.createServer(function (req, res) { //create web server
-  let cartItems = undefined
+var server = http.createServer(async function (req, res) { //create web server
+  let cartItems = await parseCartItems
 
-  try {
-    if (req.method === 'POST') {
-      let body = '';
-
-      req.on('data', chunk => {
-        body += chunk.toString();
-      });
-
-      req.on('end', () => {
-        console.log("Raw body:", body);
-
-        // detect content type
-        const ct = req.headers['content-type'] || '';
-
-        if (ct.includes('application/json')) {
-          // handle JSON
-          try {
-            const data = JSON.parse(body);
-            console.log("Parsed JSON:", data);
-          } catch (err) {
-            console.error("Bad JSON:", err.message);
-          }
-        } else if (ct.includes('application/x-www-form-urlencoded')) {
-          // handle form
-          const parsed = qs.parse(body);
-          console.log("Parsed form:", parsed);
-
-          // if your form had <input name="items" value='[{"id":"..."}]'>
-          if (parsed.items) {
-            try {
-              const items = JSON.parse(parsed.items);
-              cartItems = items
-              console.log("Decoded items array:", items);
-            } catch (err) {
-              console.error("items not valid JSON:", parsed.items);
-            }
-          }
-        }
-      });
-    }
-  }
-  catch {
-    console.log("not POST")
-  }
 
   console.log("afterrr",cartItems)
 

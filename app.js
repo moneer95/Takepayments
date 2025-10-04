@@ -86,30 +86,41 @@ var server = http.createServer(function(req, res) { //create web server
     const getParams = url.parse(req.url, true).query;
     let body = '';
 
-
-    if (req.method === 'POST') {
-      let body = '';
-  
-      req.on('data', chunk => {
-        body += chunk.toString();
-      });
-  
-      req.on('end', () => {
-        console.log("Request body:", body);
-        // if JSON, you can also do:
-        try {
-          const data = JSON.parse(body);
-          console.log("Parsed:", data);
-        } catch (e) {
-          console.log("Not JSON:", body);
-        }
-  
-        // send a bare response so client doesn't hang
-        res.writeHead(200);
-        res.end();
-      });
+    try{
+      if (req.method === 'POST') {
+        let body = '';
+    
+        req.on('data', chunk => {
+          body += chunk.toString();
+        });
+    
+        req.on('end', () => {
+          console.log("Request body:", body);
+          // if JSON, you can also do:
+          try {
+            const data = JSON.parse(body);
+            console.log("Parsed:", data);
+          } catch (e) {
+            console.log("Not JSON:", body);
+          }
+    
+          // send a bare response so client doesn't hang
+          res.writeHead(200);
+          res.end();
+        });
+      }
     }
-      else {
+    catch{
+      console.log("not POST")
+    }
+
+    if (req.method != 'POST') {
+      const url = new URL("https://takepayments.ea-dental.com" + req.url)
+      const cartItems = url.searchParams.get('items')
+        // Return a form to collect payment details
+        body = getPaymentForm();
+        sendResponse(body, res);
+    } else {
         body = '';
 
         req.on('data', function(data) {

@@ -103,10 +103,6 @@ var server = http.createServer(function(req, res) { //create web server
           } catch (e) {
             console.log("Not JSON:", body);
           }
-    
-          // send a bare response so client doesn't hang
-          res.writeHead(200);
-          res.end();
         });
       }
     }

@@ -130,6 +130,8 @@ var server = http.createServer(function (req, res) { //create web server
     console.log("not POST")
   }
 
+  console.log("afterrr",cartItems)
+
   if (cartItems) {
     // Return a form to collect payment details
     console.log("booodddyyyyy")

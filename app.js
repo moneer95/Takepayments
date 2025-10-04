@@ -84,7 +84,7 @@ function clearCookie(res, name) {
 
 var server = http.createServer(function (req, res) { //create web server
   let body = '';
-  const cartItems = undefined
+  let cartItems = undefined
 
   try {
     req.on('data', chunk => {

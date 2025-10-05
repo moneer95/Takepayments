@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const httpBuildQuery = require('http-build-query');
 const url = require('url');
 const htmlUtils = require('./htmlutils.js');
+const https = require('https'); // For making HTTP requests
 
 const gateway = require('./gateway.js').Gateway;
 const assert = require('assert');
@@ -210,6 +211,68 @@ function anyKeyStartsWith(haystack, needle) {
   Helper function to monitor and act upon differing
   gateway responses
 */
+async function callSuccessEndpoint(responseFields, session) {
+  return new Promise((resolve, reject) => {
+    try {
+      const successUrl = process.env.SUCCESS_ENDPOINT_URL || 'https://test.ea-dental.com/payment-success';
+      const urlParts = url.parse(successUrl);
+      
+      const payload = {
+        status: 'success',
+        responseCode: responseFields["responseCode"],
+        responseMessage: responseFields["responseMessage"],
+        transactionId: responseFields["transactionUnique"],
+        cartItems: session.cartItems || [],
+        paymentData: session.paymentData || {},
+        timestamp: new Date().toISOString()
+      };
+
+      const postData = JSON.stringify(payload);
+
+      const options = {
+        hostname: urlParts.hostname,
+        port: urlParts.port || 443,
+        path: urlParts.path,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(postData),
+          'Authorization': `Bearer ${process.env.SUCCESS_ENDPOINT_TOKEN || ''}`
+        }
+      };
+
+      const req = https.request(options, (res) => {
+        let data = '';
+        
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+        
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            console.log('Success endpoint called successfully');
+            resolve(data);
+          } else {
+            console.error('Success endpoint call failed:', res.statusCode, res.statusMessage);
+            reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`));
+          }
+        });
+      });
+
+      req.on('error', (error) => {
+        console.error('Error calling success endpoint:', error.message);
+        reject(error);
+      });
+
+      req.write(postData);
+      req.end();
+    } catch (error) {
+      console.error('Error preparing success endpoint call:', error.message);
+      reject(error);
+    }
+  });
+}
+
 function processResponseFields(responseFields, gateway, req, res) {
   switch (responseFields["responseCode"]) {
     case "65802":
@@ -217,7 +280,25 @@ function processResponseFields(responseFields, gateway, req, res) {
       updateSession(req, res, { threeDSRef: responseFields["threeDSRef"] });
       return htmlUtils.showFrameForThreeDS(responseFields);
     case "0":
-      return "<p>Thank you for your payment.</p>"
+      // Call success endpoint with response and cart items
+      const session = getSession(req);
+      callSuccessEndpoint(responseFields, session).then(() => {
+        // Continue with success response after calling endpoint
+        const successHtml = `
+          <script>
+            // Redirect to success page after a short delay
+            setTimeout(() => {
+              window.location.href = '${process.env.SUCCESS_REDIRECT_URL || 'https://test.ea-dental.com/success'}';
+            }, 1000);
+          </script>
+          <p>Thank you for your payment. Redirecting...</p>
+        `;
+        sendResponse(successHtml, res);
+      }).catch((error) => {
+        console.error('Success endpoint error:', error);
+        sendResponse('<p>Thank you for your payment.</p>', res);
+      });
+      return; // Don't return anything here since we're handling response asynchronously
     default:
       return "<p>Failed to take payment: message=" + responseFields["responseMessage"] + " code=" + responseFields["responseCode"] + "</p>"
   }

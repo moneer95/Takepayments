@@ -132,7 +132,7 @@ var server = http.createServer(async function (req, res) { //create web server
 
         gateway.directRequest(fields).then((response) => {
           if (response.responseCode === "0") {
-            clearSession(req, res);
+            // clearSession(req, res);
           }
           body = processResponseFields(response, gateway, req, res);
           sendResponse(body, res);
@@ -218,15 +218,17 @@ function processResponseFields(responseFields, gateway, req, res) {
       return htmlUtils.showFrameForThreeDS(responseFields);
     case "0":
       const session = getSession(req);
-      return `
+      const successForm = `
             <form method="post" action="https://test.ea-dental.com/payment-succeed">
               <input type="hidden" name="items" value="${encodeURIComponent(JSON.stringify(session.cartItems||[]))}" />
                 <p>
                   <button type="submit">Succeed</button>
                 </p>
             </form>
-
       `
+
+      clearSession(req, res);
+      return successForm
     default:
       return "<p>Failed to take payment: message=" + responseFields["responseMessage"] + " code=" + responseFields["responseCode"] + "</p>"
   }

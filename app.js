@@ -1,6 +1,8 @@
 const http = require('http'); // Import Node.js core module
 const qs = require('querystring');
 const { parseCartItems } = require('./utils')
+const { getPaymentForm } = require('./paymentForm');
+
 
 const crypto = require('crypto');
 const httpBuildQuery = require('http-build-query');
@@ -250,51 +252,7 @@ function sendResponse(body, res) {
 
 server.listen(8012);
 
-// Payment form to collect card details
-function getPaymentForm() {
-  return `
-        <form method="post" action="?">
-            <input type="hidden" name="action" value="collect_payment" />
-            <h2>Payment Details</h2>
-            <p>
-                <label>Card Number:</label><br>
-                <input type="text" name="cardNumber" placeholder="1234567890123456" required />
-            </p>
-            <p>
-                <label>Expiry Month:</label><br>
-                <input type="text" name="cardExpiryMonth" placeholder="MM" required />
-            </p>
-            <p>
-                <label>Expiry Year:</label><br>
-                <input type="text" name="cardExpiryYear" placeholder="YY" required />
-            </p>
-            <p>
-                <label>CVV:</label><br>
-                <input type="text" name="cardCVV" placeholder="123" required />
-            </p>
-            <p>
-                <label>Customer Name:</label><br>
-                <input type="text" name="customerName" placeholder="John Doe" required />
-            </p>
-            <p>
-                <label>Customer Email:</label><br>
-                <input type="email" name="customerEmail" placeholder="john@example.com" required />
-            </p>
-            <p>
-                <label>Customer Address:</label><br>
-                <input type="text" name="customerAddress" placeholder="123 Main Street" required />
-            </p>
-            <p>
-                <label>Customer Post Code:</label><br>
-                <input type="text" name="customerPostCode" placeholder="SW1A 1AA" required />
-            </p>
-            <!-- Amount will be calculated from cart items -->
-            <p>
-                <button type="submit">Pay Now</button>
-            </p>
-        </form>
-    `;
-}
+
 
 // This provides data from form for production use
 function getInitialFields(pageURL, remoteAddress, paymentData = {}, cartItems = []) {

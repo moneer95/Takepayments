@@ -237,6 +237,7 @@ function processResponseFields(responseFields, gateway, req, res) {
       clearSession(req, res);
       return successForm
     default:
+      clearSession(req, res)
       return "<p>Failed to take payment: message=" + responseFields["responseMessage"] + " code=" + responseFields["responseCode"] + "</p>"
   }
 }

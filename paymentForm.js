@@ -95,7 +95,7 @@ function getPaymentForm() {
         font-size:13px; color:#111827; font-weight:600;
       }
       .input{
-        width:100%;
+        width:85%;
         padding:12px 14px;
         border:1px solid var(--border);
         border-radius:12px;

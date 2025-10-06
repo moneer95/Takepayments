@@ -164,6 +164,7 @@ var server = http.createServer(async function (req, res) { //create web server
         let reqFields = {
           action: 'SALE',
           merchantID: process.env.GATEWAY_MERCHANT_ID || '278346',
+          merchantSecret: process.env.GATEWAY_MERCHANT_SECRET || '5CZ4T3pdVLUN011UrKFD', // ✅ add this
           threeDSRef: session.threeDSRef,
           threeDSResponse: '',
         };

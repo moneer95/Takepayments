@@ -101,7 +101,7 @@ var server = http.createServer(async function (req, res) { //create web server
     updateSession(req, res, { cartItems: cartItems });
 
     // Return a form to collect payment details
-    body = getPaymentForm();
+    body = getPaymentForm(getTotalAmount(cartItems));
     sendResponse(body, res);
   } else {
     body = '';
@@ -253,16 +253,7 @@ function getInitialFields(pageURL, remoteAddress, paymentData = {}, cartItems = 
   let uniqid = Math.random().toString(36).substr(2, 10)
 
   // Calculate amount from cart items if available, otherwise use paymentData amount
-  let totalAmount = 1000; // default
-  if (cartItems && cartItems.length > 0) {
-    totalAmount = cartItems.reduce((sum, item) => {
-      const price = Number(item.price || 0);
-      const quantity = Number(item.quantity || 1);
-      return sum + (price * quantity);
-    }, 0);
-  } else if (paymentData.amount) {
-    totalAmount = Number(paymentData.amount);
-  }
+  let totalAmount = getTotalAmount(cartItems);
 
   return {
     "merchantID": process.env.GATEWAY_MERCHANT_ID || "278346",
@@ -289,4 +280,20 @@ function getInitialFields(pageURL, remoteAddress, paymentData = {}, cartItems = 
     "threeDSVersion": "2",
     "threeDSRedirectURL": pageURL + "&acs=1"
   }
+}
+
+
+function getTotalAmount(cartItems){
+  if (cartItems && cartItems.length > 0) {
+    return cartItems.reduce((sum, item) => {
+      const price = Number(item.price || 0);
+      const quantity = Number(item.quantity || 1);
+      return sum + (price * quantity);
+    }, 0);
+  }
+
+  else{
+    return undefined
+  }
+
 }

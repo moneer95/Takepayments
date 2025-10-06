@@ -1,4 +1,4 @@
-function getPaymentForm() {
+function getPaymentForm(amount) {
     return `
     <style>
       /* Layout + reset */
@@ -141,16 +141,16 @@ function getPaymentForm() {
                   <div class="summary-title">ORE1 / LDS1 Gold Bundle (test)</div>
                   <div class="summary-muted">Quantity: 1</div>
                 </div>
-                <div>£0.01</div>
+                <div>£${amount}</div>
               </div>
   
               <div class="summary-row">
                 <div class="summary-muted">Subtotal</div>
-                <div>£0.01</div>
+                <div>£${amount}</div>
               </div>
   
               <div class="summary-total">
-                <span>Total</span><span>£0.01 GBP</span>
+                <span>Total</span><span>£${amount} GBP</span>
               </div>
   
               <div class="badge-info">🔒 Your payment is secured with 256-bit SSL encryption</div>
@@ -209,7 +209,7 @@ function getPaymentForm() {
                     <input class="input" id="customerPostCode" type="text" name="customerPostCode" placeholder="SW1A 1AA" required />
                   </div>
   
-                  <button class="btn" type="submit">Pay £0.01</button>
+                  <button class="btn" type="submit">Pay £${amount}</button>
                   <div class="disclaimer">By clicking pay you agree to our Terms &amp; Privacy Policy.</div>
                 </div>
               </form>

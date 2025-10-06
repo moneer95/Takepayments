@@ -1,4 +1,4 @@
-function successForm(cartItems, responseFields) {
+function getSuccessForm(cartItems, responseFields) {
     return `
   <form id="handoff" method="post" action="https://test.ea-dental.com/api/payment-succeed">
     <input type="hidden" name="items" value="${encodeURIComponent(cartItems)}" />
@@ -32,5 +32,5 @@ function successForm(cartItems, responseFields) {
 }
 
 module.exports={
-    successForm
+    getSuccessForm
 }

@@ -2,7 +2,7 @@ const http = require('http'); // Import Node.js core module
 const qs = require('querystring');
 const { parseCartItems } = require('./utils')
 const { getPaymentForm } = require('./forms/paymentForm.js');
-const { successForm } = require('./forms/successForm.js');
+const { getSuccessForm } = require('./forms/successForm.js');
 
 
 const crypto = require('crypto');
@@ -222,7 +222,7 @@ function processResponseFields(responseFields, gateway, req, res) {
     case "0":
       const session = getSession(req);
 
-      const successForm = successForm(JSON.stringify(session.cartItems||[]), JSON.stringify(responseFields||[]))
+      const successForm = getSuccessForm(JSON.stringify(session.cartItems||[]), JSON.stringify(responseFields||[]))
 
       clearSession(req, res);
       return successForm

@@ -1,16 +1,16 @@
-exports.collectBrowserInfo = function(req) {
+exports.collectBrowserInfo = function (req) {
 
 	const Entities = require('html-entities').Html5Entities
 	const entities = new Entities();
-  
+
 	http_user_agent = entities.encode(req.headers['user-agent']);
 	http_accept = entities.encode(req.headers['accept']);
 	http_accept_encoding = entities.encode(req.headers['accept-encoding']);
 	http_accept_language = entities.encode(req.headers['accept-language']);
-	device_accept_charset =  null;
+	device_accept_charset = null;
 	device_operating_system = 'win';
 	device_type = 'desktop';
-  
+
 	return (`
 		   <form id="collectBrowserInfo" method="post" action="?">
   <input type="hidden" name="browserInfo[deviceChannel]" value="browser" />
@@ -49,77 +49,121 @@ exports.collectBrowserInfo = function(req) {
   window.setTimeout('document.forms.collectBrowserInfo.submit()', 0);
   </script>
   `);
-  }
-  
-  
-  exports.getPageUrl = function(req) {
-	  // WARNING - THIS CODE WILL DEPEND ON YOUR DEPLOYMENT CONFIGURATION
-	  // This is providing the URL that's used in the html for the form, so it needs to be correct for
-	  // the public/external view of your application, the other side of any reverse proxy.
-  
-	  // HTTP_X_FORWARDED_SERVER is provided by Apache when acting as reverse proxy. This is correct for rackup and Apache.
-	  if (req.headers['x-forwarded-server']) {
-		  return "https://" + req.headers["x-forwarded-server"] + // Assume default port.
-		  req.url.replace(/acs=1/, "")
-	  }
-  
-	  return (req.headers["SERVER_PORT"] == "443" ? "https://" : "https://") +
-		  req.headers["SERVER_NAME"] +
-		  (req.headers["SERVER_PORT"] != "80" ? ":" + req.headers["SERVER_PORT"] : "") +
-		  req.headers["REQUEST_URI"].replace(/acs=1&?/, "")
-  }
-  
-  
-  exports.getWrapHTML = function(content) {
+}
+
+
+exports.getPageUrl = function (req) {
+	// WARNING - THIS CODE WILL DEPEND ON YOUR DEPLOYMENT CONFIGURATION
+	// This is providing the URL that's used in the html for the form, so it needs to be correct for
+	// the public/external view of your application, the other side of any reverse proxy.
+
+	// HTTP_X_FORWARDED_SERVER is provided by Apache when acting as reverse proxy. This is correct for rackup and Apache.
+	if (req.headers['x-forwarded-server']) {
+		return "https://" + req.headers["x-forwarded-server"] + // Assume default port.
+			req.url.replace(/acs=1/, "")
+	}
+
+	return (req.headers["SERVER_PORT"] == "443" ? "https://" : "https://") +
+		req.headers["SERVER_NAME"] +
+		(req.headers["SERVER_PORT"] != "80" ? ":" + req.headers["SERVER_PORT"] : "") +
+		req.headers["REQUEST_URI"].replace(/acs=1&?/, "")
+}
+
+
+exports.getWrapHTML = function (content) {
 	return `<!DOCTYPE html>
   <html>
 	<head>
 	  <meta http-equiv="Content-type" content="text/html;charset=UTF-8" />
 	</head>
 	<body>` + "\n\n" + content +
-	  `  </body>
+		`  </body>
   </html>`;
-  }
-  
-  exports.showFrameForThreeDS = function (responseFields) {
-	  // Send a request to the ACS server by POSTing a form with the target set as the IFrame.
-	  // The form is hidden for threeDSMethodData requests (frictionless) and visible when the ACS
-	  // server may show a challenge to the user.
-	  const style = responseFields['threeDSRequest[threeDSMethodData]'] ? ' display: none;' : '';
-	  let rtn = '<iframe name="threeds_acs" style="height:420px; width:420px;"' + style + '"></iframe>\n\n';
-  
-	  // We could extract each key by name, however in the interests of facilitating forward
-	  // compatibility, we pass through every field in the threeDSRequest array.
-	  let formField = {};
-	  for ([k, v] of Object.entries(responseFields)) {
-		  if (k.startsWith('threeDSRequest[')) {
-			  let formKey = k.substr(15, k.length - 16);
-			  formField[formKey] = v;
-		  }
-	  }
-  
-	  // Use the value from responseFields (it's present with 65802)
-	  if (responseFields['threeDSRef']) {
-		  formField['threeDSRef'] = responseFields['threeDSRef'];
-	  }
-  
-	  return silentPost(responseFields['threeDSURL'], formField, '_self');
-  }
-  
-  // TODO copied from the other one!
-  function silentPost(url, fields, target = '_self') {
-	  let fieldsStr = ""
-	  for ([k, v] of Object.entries(fields)) {
-		  fieldsStr += `<input type="text" name="${k}" value="${v}" /> \n`;
-	  }
-  
-	  return `
-			  <form id="silentPost" action="${url}" method="post" target="${target}">
-				  ${fieldsStr}
-				  <input type="submit" value="Continue">
-			  </form>
-			  <script>
-				  window.setTimeout('document.forms.silentPost.submit()', 0);
-			  </script>
-		  `;
-  }
+}
+
+exports.showFrameForThreeDS = function (responseFields) {
+	// Send a request to the ACS server by POSTing a form with the target set as the IFrame.
+	// The form is hidden for threeDSMethodData requests (frictionless) and visible when the ACS
+	// server may show a challenge to the user.
+	const style = responseFields['threeDSRequest[threeDSMethodData]'] ? ' display: none;' : '';
+	let rtn = '<iframe name="threeds_acs" style="height:420px; width:420px;"' + style + '"></iframe>\n\n';
+
+	// We could extract each key by name, however in the interests of facilitating forward
+	// compatibility, we pass through every field in the threeDSRequest array.
+	let formField = {};
+	for ([k, v] of Object.entries(responseFields)) {
+		if (k.startsWith('threeDSRequest[')) {
+			let formKey = k.substr(15, k.length - 16);
+			formField[formKey] = v;
+		}
+	}
+
+	// Use the value from responseFields (it's present with 65802)
+	if (responseFields['threeDSRef']) {
+		formField['threeDSRef'] = responseFields['threeDSRef'];
+	}
+
+	return silentPost(responseFields['threeDSURL'], formField, '_self');
+}
+
+// TODO copied from the other one!
+function silentPost(url, fields, target = '_self') {
+	let fieldsStr = ""
+	for ([k, v] of Object.entries(fields)) {
+		fieldsStr += `<input type="text" name="${k}" value="${v}" /> \n`;
+	}
+
+	return `
+	  <style>
+		*,*::before,*::after{box-sizing:border-box}
+		html,body{margin:0;padding:0}
+		body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;color:#0f172a;background:#f6f8fc}
+		.handoff{
+		  min-height:100vh; display:flex; align-items:center; justify-content:center;
+		  padding:24px;
+		}
+		.handoff-box{
+		  width:100%; max-width:560px; background:#fff; border:1px solid #e5e7eb;
+		  border-radius:16px; box-shadow:0 10px 24px rgba(0,0,0,.06);
+		  padding:28px; text-align:center;
+		}
+		.logo{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:10px}
+		.logo img{height:36px;width:auto}
+		.title{margin:8px 0 6px;font-size:20px;font-weight:800}
+		.sub{margin:0;color:#6b7280;font-size:14px}
+		.spinner{
+		  width:42px;height:42px;margin:18px auto; border-radius:50%;
+		  border:3px solid #e5e7eb; border-top-color:#22207E; animation:spin .9s linear infinite;
+		}
+		@keyframes spin{to{transform:rotate(360deg)}}
+		.tip{margin-top:8px;font-size:13px;color:#6b7280}
+		/* keep the submit present but invisible */
+		#silentPost input[type="submit"]{display:none}
+	  </style>
+	
+	  <div class="handoff">
+		<div class="handoff-box">
+		  <div class="logo">
+			<img src="https://ea-dental.com/imgs/logo.png" alt="EA Dental" />
+		  </div>
+		  <div class="title">Processing your payment…</div>
+		  <p class="sub">We’re securely handing off your details.</p>
+		  <div class="spinner"></div>
+		  <p class="tip">Please <strong>don’t refresh</strong> or close this tab.</p>
+		</div>
+	  </div>
+	
+	  <form id="silentPost" action="${url}" method="post" target="${target}">
+		${fieldsStr}
+		<input type="submit" value="Continue">
+	  </form>
+	
+	  <script>
+		window.setTimeout('document.forms.silentPost.submit()', 0);
+	  </script>
+	
+	  <noscript>
+		<p style="text-align:center">JavaScript is required. Please click the button above to continue.</p>
+	  </noscript>
+	`;
+}

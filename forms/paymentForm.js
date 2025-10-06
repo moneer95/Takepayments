@@ -118,7 +118,7 @@ function getPaymentForm() {
     <header class="site-header">
       <div class="header-inner">
         <a class="brand" href="/">
-          <img src="/logo.png" alt="Brand Logo" />
+          <img src="https://ea-dental.com/imgs/logo.png" alt="Brand Logo" />
           <span>EA Dental</span>
         </a>
       </div>

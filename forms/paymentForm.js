@@ -137,10 +137,6 @@ function getPaymentForm(amount) {
             <div class="card-head">Order Summary</div>
             <div class="card-body">
               <div class="summary-row">
-                <div>
-                  <div class="summary-title">ORE1 / LDS1 Gold Bundle (test)</div>
-                  <div class="summary-muted">Quantity: 1</div>
-                </div>
                 <div>£${amount}</div>
               </div>
   

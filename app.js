@@ -211,6 +211,8 @@ function anyKeyStartsWith(haystack, needle) {
   gateway responses
 */
 function processResponseFields(responseFields, gateway, req, res) {
+  console.log('res',res)
+  console.log('res fff',responseFields)
   switch (responseFields["responseCode"]) {
     case "65802":
       // Store threeDSRef in session

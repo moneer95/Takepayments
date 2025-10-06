@@ -178,6 +178,15 @@ var server = http.createServer(async function (req, res) { //create web server
         }
         // Remove the last & for good measure
         reqFields.threeDSResponse = reqFields.threeDSResponse.substr(0, reqFields.threeDSResponse.length - 1);
+
+
+
+        // Debug logs (what you asked “where” to put)
+        console.log('3DS reqFields has secret:', !!reqFields.merchantSecret);
+        console.log('threeDSRef:', reqFields.threeDSRef);
+        console.log('threeDSResponse length:', reqFields.threeDSResponse?.length);
+
+
         gateway.directRequest(reqFields).then((response) => {
           if (response.responseCode === "0") {
             // clearSession(req, res);
@@ -223,7 +232,7 @@ function processResponseFields(responseFields, gateway, req, res) {
     case "0":
       const session = getSession(req);
 
-      const successForm = getSuccessForm(JSON.stringify(session.cartItems||[]), JSON.stringify(responseFields||[]))
+      const successForm = getSuccessForm(JSON.stringify(session.cartItems || []), JSON.stringify(responseFields || []))
 
       clearSession(req, res);
       return successForm
@@ -284,7 +293,7 @@ function getInitialFields(pageURL, remoteAddress, paymentData = {}, cartItems = 
 }
 
 
-function getTotalAmount(cartItems){
+function getTotalAmount(cartItems) {
   if (cartItems && cartItems.length > 0) {
     return cartItems.reduce((sum, item) => {
       const price = Number(item.price || 0);
@@ -293,7 +302,7 @@ function getTotalAmount(cartItems){
     }, 0);
   }
 
-  else{
+  else {
     return undefined
   }
 

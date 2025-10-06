@@ -211,8 +211,6 @@ function anyKeyStartsWith(haystack, needle) {
   gateway responses
 */
 function processResponseFields(responseFields, gateway, req, res) {
-  console.log('res',res)
-  console.log('res fff',responseFields)
   switch (responseFields["responseCode"]) {
     case "65802":
       // Store threeDSRef in session
@@ -223,7 +221,7 @@ function processResponseFields(responseFields, gateway, req, res) {
       const successForm = `
             <form method="post" action="https://test.ea-dental.com/api/payment-succeed">
               <input type="hidden" name="items" value="${encodeURIComponent(JSON.stringify(session.cartItems||[]))}" />
-              <input type="hidden" name="items" value="${encodeURIComponent(JSON.stringify(session.res||[]))}" />
+              <input type="hidden" name="items" value="${encodeURIComponent(JSON.stringify(responseFields||[]))}" />
                 <p>
                   <button type="submit">Succeed</button>
                 </p>

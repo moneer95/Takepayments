@@ -90,7 +90,7 @@ var server = http.createServer(async function (req, res) { //create web server
 
   let cartItems = undefined
 
-  if (req.headers.origin in ["http://localhost:3000", "https://test.ea-dental.com"]) {
+  if (req.headers.origin == "https://test.ea-dental.com") {
     cartItems = await parseCartItems(req)
   }
 

@@ -219,7 +219,7 @@ function processResponseFields(responseFields, gateway, req, res) {
     case "0":
       const session = getSession(req);
       const successForm = `
-            <form method="post" action="https://test.ea-dental.com/payment-succeed">
+            <form method="post" action="https://test.ea-dental.com/api/payment-succeed">
               <input type="hidden" name="items" value="${encodeURIComponent(JSON.stringify(session.cartItems||[]))}" />
                 <p>
                   <button type="submit">Succeed</button>

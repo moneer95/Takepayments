@@ -132,7 +132,7 @@ var server = http.createServer(async function (req, res) { //create web server
 
         gateway.directRequest(fields).then((response) => {
           if (response.responseCode === "0") {
-            clearSession(req, res);
+            // clearSession(req, res);
           }
           body = processResponseFields(response, gateway, req, res);
           sendResponse(body, res);
@@ -176,7 +176,7 @@ var server = http.createServer(async function (req, res) { //create web server
         reqFields.threeDSResponse = reqFields.threeDSResponse.substr(0, reqFields.threeDSResponse.length - 1);
         gateway.directRequest(reqFields).then((response) => {
           if (response.responseCode === "0") {
-            clearSession(req, res);
+            // clearSession(req, res);
           }
           body = processResponseFields(response, gateway, req, res);
           sendResponse(body, res);

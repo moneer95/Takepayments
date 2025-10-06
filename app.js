@@ -1,7 +1,8 @@
 const http = require('http'); // Import Node.js core module
 const qs = require('querystring');
 const { parseCartItems } = require('./utils')
-const { getPaymentForm } = require('./paymentForm');
+const { getPaymentForm } = require('./forms/paymentForm.js');
+const { successForm } = require('./forms/successForm.js');
 
 
 const crypto = require('crypto');
@@ -220,15 +221,8 @@ function processResponseFields(responseFields, gateway, req, res) {
       return htmlUtils.showFrameForThreeDS(responseFields);
     case "0":
       const session = getSession(req);
-      const successForm = `
-            <form method="post" action="https://test.ea-dental.com/api/payment-succeed">
-              <input type="hidden" name="items" value="${encodeURIComponent(JSON.stringify(session.cartItems||[]))}" />
-              <input type="hidden" name="response" value="${encodeURIComponent(JSON.stringify(responseFields||[]))}" />
-                <p>
-                  <button type="submit">Succeed</button>
-                </p>
-            </form>
-      `
+
+      const successForm = successForm(JSON.stringify(session.cartItems||[]), JSON.stringify(responseFields||[]))
 
       clearSession(req, res);
       return successForm

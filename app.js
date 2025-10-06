@@ -235,6 +235,7 @@ function processResponseFields(responseFields, gateway, req, res) {
   }
 }
 
+
 /*
   sendResponse
 

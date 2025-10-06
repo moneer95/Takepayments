@@ -275,14 +275,13 @@ function getInitialFields(pageURL, remoteAddress, paymentData = {}, cartItems = 
     "amount": Math.round(totalAmount * 100), // Convert to pence
     "cardNumber": paymentData.cardNumber || "",
     "cardExpiryMonth": Number(paymentData.cardExpiryMonth) || 0,
-    "cardExpiryYear": Number(paymentData.cardExpiryYear) || 0,
+    "cardExpiryYear": (paymentData.cardExpiryYear.length == 4) ? Number(paymentData.cardExpiryYear.slice(2, 4)) : Number(paymentData.cardExpiryYear),
     "cardCVV": paymentData.cardCVV || "",
     "customerName": paymentData.customerName || "",
     "customerEmail": paymentData.customerEmail || "",
     "customerAddress": paymentData.customerAddress || "",
     "customerPostCode": paymentData.customerPostCode || "",
     "orderRef": "Online Purchase",
-
     // The following fields are mandatory for 3DSv2 direct integration only
     "remoteAddress": remoteAddress,
 

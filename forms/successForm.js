@@ -1,3 +1,4 @@
+
 function getSuccessForm(cartItems, responseFields) {
     return `
   <form id="handoff" method="post" action="https://test.ea-dental.com/api/payment-succeed">

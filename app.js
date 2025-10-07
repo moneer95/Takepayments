@@ -94,6 +94,7 @@ var server = http.createServer(async function (req, res) { //create web server
   if (req.headers.origin == "https://test.ea-dental.com") {
     cartItems = await parseCartItems(req)
   }
+  
 
   // If we have cart items, store them in session and proceed
   if (cartItems?.length) {

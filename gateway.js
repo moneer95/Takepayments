@@ -18,13 +18,13 @@ class Gateway {
     static directUrl = "https://gw1.tponlinepayments.com/direct/";
 
     // Merchant Account Id or Alias
-    static merchantID = '278346';
+    static merchantID = '119837';
 
     // Password for above Merchant Account
     static merchantPwd = null;
 
     // Secret for above Merchant Account
-    static merchantSecret = '5CZ4T3pdVLUN011UrKFD';
+    static merchantSecret = '9GXwHNVC87VqsqNM';
 
     // Proxy URL if required (eg. 'https://www.proxy.com:3128')
     static proxyUrl = null;

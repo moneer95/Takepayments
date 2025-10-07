@@ -164,7 +164,7 @@ var server = http.createServer(async function (req, res) { //create web server
 
         let reqFields = {
           action: 'SALE',
-          merchantID: process.env.GATEWAY_MERCHANT_ID || '278346',
+          merchantID: process.env.GATEWAY_MERCHANT_ID || '119837',
           merchantSecret: process.env.GATEWAY_MERCHANT_SECRET || '5CZ4T3pdVLUN011UrKFD', // ✅ add this
           threeDSRef: session.threeDSRef,
           threeDSResponse: '',
@@ -268,7 +268,7 @@ function getInitialFields(pageURL, remoteAddress, paymentData = {}, cartItems = 
   let totalAmount = getTotalAmount(cartItems);
 
   return {
-    "merchantID": process.env.GATEWAY_MERCHANT_ID || "278346",
+    "merchantID": process.env.GATEWAY_MERCHANT_ID || "119837",
     "merchantSecret": process.env.GATEWAY_MERCHANT_SECRET || "5CZ4T3pdVLUN011UrKFD",
     "action": "SALE",
     "type": 1,

@@ -227,6 +227,7 @@ function anyKeyStartsWith(haystack, needle) {
 function processResponseFields(responseFields, gateway, req, res) {
   switch (responseFields["responseCode"]) {
     case "65802":
+      console.log("threeDSRef cookie set")
       // Store threeDSRef in session
       setCookie(res, 'threeDSRef', responseFields['threeDSRef'], {maxAge: 900, secure: true, httpOnly: false, sameSite: 'None'})
       updateSession(req, res, { threeDSRef: responseFields["threeDSRef"] });

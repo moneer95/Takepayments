@@ -98,7 +98,7 @@ function setCookie(
 }
 
 function clearCookie(res, name) {
-  // setCookie(res, name, '', { maxAge: 0 });
+  setCookie(res, name, '', { maxAge: 0 });
 }
 
 var server = http.createServer(async function (req, res) { //create web server

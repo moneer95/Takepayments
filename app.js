@@ -68,14 +68,29 @@ function parseCookies(req) {
   }, {});
 }
 
-function setCookie(res, name, value, { maxAge = 900, path = '/', secure = true, httpOnly = true, sameSite = 'None' } = {}) {
+function setCookie(
+  res,
+  name,
+  value,
+  {
+    maxAge = 500,                  // seconds from now (not epoch)
+    path = '/',
+    domain = '.ea-dental.com',     // share across subdomains
+    secure = true,
+    httpOnly = false,              // you read it in JS, so keep false
+    sameSite = 'None',             // cross-site 3DS redirects
+    partitioned = false            // optionally enable CHIPS
+  } = {}
+) {
   const parts = [
     `${name}=${encodeURIComponent(value)}`,
     `Max-Age=${maxAge}`,
     `Path=${path}`,
+    domain ? `Domain=${domain}` : '',
     secure ? 'Secure' : '',
     httpOnly ? 'HttpOnly' : '',
-    sameSite ? `SameSite=${sameSite}` : ''
+    sameSite ? `SameSite=${sameSite}` : '',
+    partitioned ? 'Partitioned' : ''   // Chrome CHIPS (optional)
   ].filter(Boolean);
   const existing = res.getHeader('Set-Cookie');
   const next = existing ? (Array.isArray(existing) ? existing.concat(parts.join('; ')) : [existing, parts.join('; ')]) : parts.join('; ');
@@ -83,7 +98,7 @@ function setCookie(res, name, value, { maxAge = 900, path = '/', secure = true, 
 }
 
 function clearCookie(res, name) {
-  setCookie(res, name, '', { maxAge: 0 });
+  // setCookie(res, name, '', { maxAge: 0 });
 }
 
 var server = http.createServer(async function (req, res) { //create web server
@@ -229,7 +244,13 @@ function processResponseFields(responseFields, gateway, req, res) {
     case "65802":
       console.log("threeDSRef cookie set")
       // Store threeDSRef in session
-      setCookie(res, 'threeDSRef', responseFields['threeDSRef'], {maxAge: Math.floor(Date.now() / 1000) + 500, secure: true, httpOnly: false, sameSite: 'None'})
+      setCookie(res, 'threeDSRef', responseFields['threeDSRef'], {
+        maxAge: 500,
+        domain: '.ea-dental.com',
+        secure: true,
+        httpOnly: false,
+        sameSite: 'None'
+      });      
       updateSession(req, res, { threeDSRef: responseFields["threeDSRef"] });
       return htmlUtils.showFrameForThreeDS(responseFields);
     case "0":

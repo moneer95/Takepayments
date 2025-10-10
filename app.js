@@ -229,7 +229,7 @@ function processResponseFields(responseFields, gateway, req, res) {
     case "65802":
       console.log("threeDSRef cookie set")
       // Store threeDSRef in session
-      setCookie(res, 'threeDSRef', responseFields['threeDSRef'], {maxAge: 900, secure: true, httpOnly: false, sameSite: 'None'})
+      setCookie(res, 'threeDSRef', responseFields['threeDSRef'], {maxAge: Math.floor(Date.now() / 1000) + 500, secure: true, httpOnly: false, sameSite: 'None'})
       updateSession(req, res, { threeDSRef: responseFields["threeDSRef"] });
       return htmlUtils.showFrameForThreeDS(responseFields);
     case "0":

@@ -1,7 +1,7 @@
 
 function getSuccessForm(cartItems, responseFields) {
     return `
-  <form id="handoff" method="post" action="https://test.ea-dental.com/api/payment-succeed">
+  <form id="handoff" method="post" action="https://ea-dental.com/api/payment-succeed">
     <input type="hidden" name="items" value="${encodeURIComponent(cartItems)}" />
     <input type="hidden" name="response" value="${encodeURIComponent(responseFields)}" />
   </form>
